@@ -18,6 +18,7 @@ int main (void){
 			case Opcode: opcode(); break;
 			case Opcodelist: opcodelist(); break;
 			case Type: show_content(); break;
+			case Assemble: assemble(); break;
 			default: Success = FALSE; break;
 		}
 		if(Success)
@@ -557,6 +558,8 @@ void show_content(){
 	char filename[MAX_COMMAND];
 	char line[MAX_COMMAND];
 	FILE *fp;
+	int file_kind;
+	struct stat file_info;  
 
 	type = Get_String_Argument( filename );
 	if( Success == FALSE || type != ENTER){
@@ -564,6 +567,13 @@ void show_content(){
 		return;
 	}
 	
+	stat(filename, &file_info);
+	file_kind = file_info.st_mode & S_IFMT;
+	if( file_kind == S_IFDIR ){
+		Success = FALSE;
+		return;
+	}
+
 	fp = fopen(filename,"r");
 	if( fp == NULL ){
 		Success = FALSE;

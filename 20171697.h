@@ -22,7 +22,10 @@ enum Mode{
 	Store_input, Erase_space
 };
 enum CharType{
-	ENTER=1, COMMA, CHAR, BLANK
+	ENTER = 1, COMMA, CHAR, BLANK
+};
+enum argument{
+	Eof = -2, Blank, Comment, One, Two, Three, Excess
 };
 
 //  Structure for storing past command
@@ -51,7 +54,7 @@ typedef struct error{
 	int line;
 	char message[100];
 	struct error *next;
-}
+}error;
 
 void Init();
 int Hash_func(char mnemonics[]);
@@ -72,9 +75,11 @@ void opcodelist();
 void show_content();
 void assemble();
 int assem_pass1( char filename[] );
+void show_error_list();
 void write_lst( char filename[], unsigned int LOCCTR, int arg_num, char comment[], char symbol[],  char mnemonic[], char operand[]);
 int read_one_line(FILE *fp, char comment[], char symbol[],  char mnemonic[], char operand[]);
-void push_symbol( char symbol[], unsigned int LOCCTR );
+int push_symbol( char symbol[], unsigned int LOCCTR );
+void push_into_error_list( error *cur);
 int find_opcode( char mne[] );
 void assem_pass2();
 

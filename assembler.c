@@ -2,8 +2,9 @@
 #include "variable.h"
 
 void assemble(){
-	char filename[MAX_COMMAND];
-	int type, arg_num;
+	char filename[100];
+	char lstname[100];
+	int type, arg_num, len;
 	int error_flag;
 
 	type = Get_String_Argument( filename );
@@ -14,10 +15,14 @@ void assemble(){
 	error_flag = assem_pass1(filename);
 	if( error_flag == TRUE ){
 		show_error_list();
-		// remove lst file
+		len = strlen( filename );
+		strncpy(lstname, filename, len-4);
+		strcat(lstname, ".lst");
+		remove(lstname);
 		Success = FALSE;
 		return;
 	}
+	/*
 	error_flag = assem_pass2(filename);
 	if( error_flag == TRUE ){
 		show_error_list();
@@ -25,6 +30,7 @@ void assemble(){
 		Success = FALSE;
 		return;
 	}
+	*/
 }
 
 void erase_symtab(){
@@ -58,10 +64,16 @@ void show_error_list(){
 
 int assem_pass1( char filename[] ){
 	FILE *fp;
+	FILE *fp2;
+	char lst_name[100];
+	char *extend = ".lst";
+
 	char symbol[7];
 	char mnemonic[7];
 	char operand[10];
 	char comment[200];
+
+	unsigned int value;
 	unsigned int LOCCTR = 0;
 	char *start = "START";
 	char *byte = "BYTE";
@@ -69,15 +81,21 @@ int assem_pass1( char filename[] ){
 	char *resb = "RESB";
 	char *resw = "RESW";
 	char *end = "END";
-	unsigned int value;
+	char *base = "BASE";
+	char *nobase = "NOBASE";
+
 	int format;
+	int format_flag;
+
 	int len;
 	int arg_num;
 	int ret;
 	int end_flag;
-	error *new_error;
-	int error_flag;
 	int line_num = 5;
+	int i;
+
+	error *new_error;
+	int error_flag = FALSE;
 
 	fp = fopen(filename,"r");
 	if( fp == NULL ){
@@ -85,14 +103,29 @@ int assem_pass1( char filename[] ){
 		return 0;
 	}
 
+	len = strlen( filename );
+	strncpy(lst_name, filename, len-4 );
+	lst_name[len-4] = '\0';
+	strcat(lst_name, extend);
+	fp2 = fopen(lst_name,"w");
+	fclose(fp2);
+
 	erase_symtab();
 
 	while(TRUE){
-		arg_num = read_one_line(fp, comment, symbol, mnemonic, operand);
-		if( !error_flag )
-			write_lst(filename, LOCCTR, arg_num, comment, symbol, mnemonic, operand);
 
-		if( arg_num > 3 ){// Error
+		comment[0] = '\0';
+		symbol[0] = '\0';
+		mnemonic[0] = '\0';
+		operand[0] = '\0';
+		arg_num = read_one_line(fp, comment, symbol, mnemonic, operand);
+
+		format_flag = FALSE;
+
+		if( error_flag == FALSE )
+			write_lst(lst_name, LOCCTR, arg_num, comment, symbol, mnemonic, operand);
+
+		if( arg_num  == Excess ){// Error
 			
 			new_error = (error*)malloc(sizeof(error));
 			new_error->line = line_num;
@@ -104,7 +137,12 @@ int assem_pass1( char filename[] ){
 			continue;
 		}
 
-		else if( arg_num == 0 )
+		else if( arg_num == Blank ){
+			line_num += 5;
+			continue;
+		}
+
+		else if( arg_num == Eof )
 			break;
 
 		else if( strcmp(mnemonic,start) == 0 ){// START
@@ -133,18 +171,25 @@ int assem_pass1( char filename[] ){
 				new_error->next = NULL;
 				push_into_error_list( new_error );		
 				error_flag = TRUE;
+				line_num += 5;
 				continue;
 			}
 		}
-		if( arg_num != 1 ){// Judge proper mnemonic
+		if( arg_num != Comment ){// Judge proper mnemonic
+
+			if( mnemonic[0] == '+' ){
+				format_flag = TRUE;
+				strcpy(mnemonic, mnemonic + 1 );
+			}
 
 			format = find_opcode( mnemonic );
+
 			if( format != 0){
 				switch( format ){
 					case 1: LOCCTR += 1; break;
 					case 2: LOCCTR += 2; break;
 					case 3: {
-								if( operand[0] == '+' )
+								if( format_flag == TRUE )
 									LOCCTR += 4;
 								else
 									LOCCTR += 3;
@@ -152,12 +197,16 @@ int assem_pass1( char filename[] ){
 							}
 				}
 			}
-			else if( strcmp( mnemonic, end) == 0 ){
+			else if( strcmp( mnemonic, end) == 0 ){// END
 				end_flag = TRUE;
 			}
-			else if( strcmp( mnemonic, byte) == 0 ){
+			else if( strcmp( mnemonic, base) == 0 || strcmp( mnemonic, nobase) == 0 ){ // BASE;NOBASE
+				line_num += 5;
+				continue;
+			}
+			else if( strcmp( mnemonic, byte) == 0 ){// BYTE
 				len = strlen( operand );
-				if( operand[1] != ''' || operand[len-1] != ''')
+				if( operand[1] != 39 || operand[len-1] != 39)
 					error_flag = TRUE;
 				if( operand[0] == 'C'){
 					len -= 3;
@@ -170,37 +219,51 @@ int assem_pass1( char filename[] ){
 				}
 				// I don't know how to deal with decimal...?
 			}
-			else if( strcmp( mnemonic, word ) == 0 ){
+			else if( strcmp( mnemonic, word ) == 0 ){// WORD
 				LOCCTR += 3;
 			}
+			else if( ( strcmp( mnemonic, resb ) && strcmp( mnemonic, resw )) != 0 ){// mnemonic error
+					new_error = (error*)malloc(sizeof(error));
+					new_error->line = line_num;
+					strcpy( new_error->message, "mnemonic has wrong character.");
+					new_error->next = NULL;
+					push_into_error_list( new_error );
+					error_flag = TRUE;
+			}
 			else{
-				if( operand[0] == '+' || operand[0] == '#' || operand[0] == '@' ){
+				// OPERAND -> DEC
+				if( operand[0] == '#' || operand[0] == '@' ){
 					strcpy( operand, operand + 1 );
-					ret = Str_convert_into_Hex( operand, &value );
 				}
-				ret = Str_convert_into_Hex( operand, &value );
-				if( ret == FALSE){
+				len = strlen(operand);
+				value = 0;
+				ret = TRUE;
+				for( i = 0; i < len ; i++ ){
+					if( operand[i] >= '0' && operand[i] <= '9' ){
+						value *= 10;
+						value += (unsigned int)( operand[i] - '0' );
+					}
+					else{
+						ret = FALSE;
+						break;
+					}
+				}
+				
+				if( ret == FALSE ){//error
 					new_error = (error*)malloc(sizeof(error));
 					new_error->line = line_num;
 					strcpy( new_error->message, "operand has wrong character.");
 					new_error->next = NULL;
 					push_into_error_list( new_error );
 					error_flag = TRUE;
+					line_num += 5;
 					continue;
 				}
-				if( strcmp( mnemonic, resb) == 0 ){
+				if( strcmp( mnemonic, resb) == 0 ){// RESB
 					LOCCTR += value;
 				}
-				else if( strcmp( mnemonic, resw) == 0 ){
+				else if( strcmp( mnemonic, resw) == 0 ){// RESW
 					LOCCTR += ( 3 * value );
-				}
-				else{
-					new_error = (error*)malloc(sizeof(error));
-					new_error->line = line_num;
-					strcpy( new_error->message, "operand has wrong character.");
-					new_error->next = NULL;
-					push_into_error_list( new_error );
-					error_flag = TRUE;			
 				}
 			}
 		} 
@@ -222,29 +285,27 @@ int assem_pass1( char filename[] ){
 }
 
 void assem_pass2(){
-	
 }
 
-void write_lst( char filename[], unsigned int LOCCTR, int arg_num, char comment[], char symbol[],  char mnemonic[], char operand[]){
+void write_lst( char lst_name[], unsigned int LOCCTR, int arg_num, char comment[], char symbol[],  char mnemonic[], char operand[]){
 	
-	FILE *fp;
-	char lst_name[100];
-	char *extend = ".lst";
-	char flag;
 	int len;
-
-	strcpy(lst_name, filename);
-	strcat(lst_name, extend);
+	FILE *fp;
+	char flag;
 
 	fp = fopen(lst_name, "a");
-	Write_Hex(fp, LOCCTR, 4);
-	if( arg_num == 1){
+
+	if( arg_num == Comment){
 		fprintf(fp, "%s", comment);
+		fclose(fp);
 		return;
 	}
-	else if( arg_num < 1 || arg_num > 3 )
+	else if( arg_num < 1 || arg_num > 3){
+		fclose(fp);
 		return;
+	}
 	
+	Write_Hex(fp, LOCCTR, 4);
 	Write_Blank(fp, 4);
 	fprintf(fp, "%s", symbol);
 	len = 10 - strlen(symbol);
@@ -253,11 +314,12 @@ void write_lst( char filename[], unsigned int LOCCTR, int arg_num, char comment[
 	len = 9 - strlen(mnemonic);
 	Write_Blank(fp, len);
 	flag = operand[0];
-	if(flag == '#' || flag == '@' || flag == '+')
+	if(flag == '#' || flag == '@')
 		fprintf(fp, "%s\n", operand);
 	else
 		fprintf(fp, " %s\n", operand);
 	fclose(fp);
+
 }
 
 int read_one_line(FILE *fp, char comment[], char symbol[],  char mnemonic[], char operand[]){
@@ -265,33 +327,50 @@ int read_one_line(FILE *fp, char comment[], char symbol[],  char mnemonic[], cha
 	char *pt;
 	char *tmp[4];
 	int arg_num = 0;
+	int len;
 
 	pt = fgets(line, 200, fp);
 	if(pt == NULL)
-		return 0;
+		return Eof;
 
 	strcpy( comment, line);
 
 	tmp[arg_num] = strtok( line, "\t\n ");
 	while( tmp[arg_num] != NULL ){
+		len = strlen( tmp[arg_num] );
+		if( len >= 2 && tmp[arg_num][len-1] == ','){
+			pt = strtok(NULL, "\t\n");
+			if( pt != NULL )
+				strcat(tmp[arg_num],pt);
+		}
 		arg_num++;
 		if( arg_num >3 )
 			break;
 		tmp[arg_num] = strtok(NULL,"\t\n ");
 	}
 
+	if(arg_num == 0)
+		return Blank;
+
 	if( tmp[0][0] == '.' ){// Case: Comment
 		mnemonic[0] = '.';
-		return 1;
+		return Comment;
 	}
-	else if( arg_num == 1)// error
-		return 4;
-
 
 	switch( arg_num ){
+		case 1:{
+				   strcpy( mnemonic, tmp[0]);
+				   break;
+			   }
 		case 2:{
-				   strcpy(mnemonic, tmp[0]);
-				   strcpy(operand, tmp[1]);
+				   if( strcmp( mnemonic, "RSUB") == 0 ){
+					   strcpy( symbol, tmp[0] );
+					   strcpy( mnemonic, tmp[1] );
+				   }
+				   else{
+					   strcpy(mnemonic, tmp[0]);
+				   	   strcpy(operand, tmp[1]);
+				   }
 				   break;
 			   }
 		case 3:{
@@ -358,6 +437,7 @@ void push_into_error_list(error *cur){
 int find_opcode( char mnemonic[] ){
 	int adr;
 	int format;
+	opcode_info *cur;
 
 	adr = Hash_func(mnemonic);
 	cur = Hash_Table[adr];

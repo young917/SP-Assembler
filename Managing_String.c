@@ -48,6 +48,7 @@ void Hex_convert_into_Str(unsigned int num, int len){
 	}
 	printf("%s",str);
 }
+
 void Write_Hex(FILE *fp, unsigned int num, int len){
 	char str[6];
 	int idx;
