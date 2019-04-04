@@ -177,7 +177,7 @@ int Get_String_Argument(char store[]){
 
 	ret = Handling_Input( Erase_space, new_input->str, NULL, 0 ,FALSE);
 	
-	if( ret != CHAR ){
+	if( ret != CHAR ){// argument doesn't exist
 		Success = FALSE;
 		return ret;
 	}

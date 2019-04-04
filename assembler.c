@@ -5,32 +5,51 @@ void assemble(){
 	char filename[100];
 	char lstname[100];
 	int type, arg_num, len;
-	int error_flag;
+	int code_len;
+
 
 	type = Get_String_Argument( filename );
 	if( Success == FALSE || type != ENTER){
 		Success = FALSE;
 		return;
 	}
-	error_flag = assem_pass1(filename);
-	if( error_flag == TRUE ){
+
+	// Initailize
+	Assemble_State.start = FALSE;
+	Assemble_State.end = FALSE;
+	Assemble_State.error = FALSE;
+	Assemble_State.base = FALSE;
+	erase_symtab();
+
+	code_len = assem_pass1(filename);
+	
+	if( Assemble_State.error == TRUE ){
 		show_error_list();
+		
+		remove(Assemble_State.OutputFileName);
+
+		erase_symtab();
+		Success = FALSE;
+		return;
+	}
+
+	assem_pass2(filename, code_len );
+	
+	if( Assemble_State.error == TRUE ){
+		show_error_list();
+
+		remove(Assemble_State.OutputFileName);
+
 		len = strlen( filename );
 		strncpy(lstname, filename, len-4);
+		lstname[len-4] = '\0';
 		strcat(lstname, ".lst");
 		remove(lstname);
+
+		erase_symtab();
 		Success = FALSE;
 		return;
 	}
-	/*
-	error_flag = assem_pass2(filename);
-	if( error_flag == TRUE ){
-		show_error_list();
-		// remove lst file and obj file
-		Success = FALSE;
-		return;
-	}
-	*/
 }
 
 void erase_symtab(){
@@ -48,7 +67,8 @@ void erase_symtab(){
 		}
 	}
 }
-void show_error_list(){
+
+void show_error_list(){// And erase
 	error *cur, *pre;
 
 	pre = cur = Error_list_head;
@@ -62,19 +82,291 @@ void show_error_list(){
 
 }
 
-int assem_pass1( char filename[] ){
+void assem_pass1( char filename[] ){
+	//return error_flag
+
 	FILE *fp;
 	FILE *fp2;
 	char lst_name[100];
 	char *extend = ".lst";
 
-	char symbol[7];
-	char mnemonic[7];
-	char operand[10];
+	char *token[3];
+	char line[200];
 	char comment[200];
+	char *blank = "\0";
+	int arg_num;
+	char *pt;
+	char *tmp;
 
-	unsigned int value;
+	unsigned int value = 0;
 	unsigned int LOCCTR = 0;
+
+	int len, ret;
+	int inst_num;
+	int line_num = 5;
+	int i;
+	error *new_error;
+
+	fp = fopen(filename,"r");
+	if( fp == NULL ){
+		Success = FALSE;
+		Assemble_State.error = TRUE;
+		return;
+	}
+
+	strcpy( Assemble_State.OutputFileName, filename );
+	strcat( Assemble_State.OutputFileName, ".txt" );
+	fp2 = fopen( Assemble_State.OutputFileName, "w" );
+	fclose( fp2 );
+
+	while(TRUE){
+
+		arg_num = 0;
+
+		pt = fgets(line, 200, fp);
+		if(pt == NULL)// FILE END
+			break;
+
+		comment[0] = '\0';
+		strcpy( comment, line );
+
+		token[arg_num] = strtok( line, "\t\n ");
+		while ( token[arg_num] != NULL ){
+
+			// make operand ' A  ,  B ' -> ' A,B '
+			if ( arg_num > 1 && token[arg_num][0] == ',' ){
+				strcat( token[arg_num-1], token[arg_num] );
+				arg_num--;
+			}
+			len = strlen( token[arg_num] );
+			if( len >= 2 && token[arg_num][len-1] == ','){
+				tmp = strtok( NULL, "\t\n ");
+				if( tmp != NULL )
+					strcat( token[arg_num], tmp);
+			}
+
+			arg_num++;
+			if( arg_num == 3 )
+				break;
+			token[arg_num] = strtok( NULL, "\t\n ");
+		}
+
+		if( token[0] != NULL && token[0][0] == '.' ){// COMMENT
+			write_interm( line_num, LOCCTR, 0, comment, blank, blank, FALSE, 0,blank );
+			line_num += 5;
+			continue;
+		}
+		
+		else if( arg_num == 0 ){// BLANK
+			line_num += 5;
+			continue;
+		}
+
+		else if( Assemble_State.end == TRUE ){
+			new_error = (error*)malloc(sizeof(error));
+			new_error->line = line_num;
+			strcpy( new_error->message, "After END, There exist more code.");
+			new_error->next = NULL;				
+			push_into_error_list( new_error );		
+			Assemble_State.error = TRUE;
+			break;
+		}
+
+		tmp = strtok( NULL, "\t\n ");
+		if( (tmp != NULL) ){// Excess : token more than 3
+			new_error = (error*)malloc(sizeof(error));
+			new_error->line = line_num;
+			strcpy( new_error->message, "Improper number of columns");
+			new_error->next = NULL;
+			push_into_error_list( new_error );
+			Assemble_State.error = TRUE;
+			line_num += 5;
+			continue;
+		}
+
+		ret = Is_Mnemonic( token[0], token[1] , &value , line_num, &inst_num);
+		if( ret == 0 )
+			ret = Is_Directive(  token[0], token[1] , &value , line_num, &inst_num );
+
+		if( ret != Nothing ){
+
+			if( Assemble_State.start == FALSE ){// START doesn't exist
+				new_error = (error*)malloc(sizeof(error));
+				new_error->line = line_num;
+				strcpy( new_error->message, "Code must begin with START.");
+				new_error->next = NULL;
+				push_into_error_list( new_error );		
+				Assemble_State.error = TRUE;
+				Assemble_State.start = TRUE;
+			}
+
+			else if( arg_num > 2 ){// Too much Operand
+				new_error = (error*)malloc(sizeof(error));
+				new_error->line = line_num;
+				strcpy( new_error->message, "This line has too many arguments.");
+				new_error->next = NULL;
+				push_into_error_list( new_error );		
+				Assemble_State.error = TRUE;
+			}
+			else if( (ret == Directive) && ( inst_num == BYTE || inst_num == WORD || inst_num == RESB || inst_num == RESW )){
+				new_error = (error*)malloc(sizeof(error));
+				new_error->line = line_num;
+				strcpy( new_error->message, " This line must have Label.");
+				new_error->next = NULL;
+				push_into_error_list( new_error );		
+				Assemble_State.error = TRUE;
+			}
+			else{
+				write_interm( line_num, LOCCTR, arg_num, comment, blank, token[0], ret , inst_num , token[1]);
+				LOCCTR += value;
+			}
+		}
+		else{
+			// SYMBOL
+			ret = push_symbol( token[0] , LOCCTR );
+			if( ret == FALSE ){
+				new_error = (error*)malloc(sizeof(error));
+				new_error->line = line_num;
+				strcpy( new_error->message, "fail to push into SYMTAB.");
+				new_error->next = NULL;
+				push_into_error_list( new_error );		
+				Assemble_State.error = TRUE;
+			}
+
+			else{
+
+				ret = Is_Mnemonic( token[1], token[2], &value, line_num, &inst_num);
+				if( ret == 0)
+					ret = Is_Directive(  token[1], token[2] , &value , line_num, &inst_num);
+
+				if( ret == Nothing ) {
+					new_error = (error*)malloc(sizeof(error));
+					new_error->line = line_num;
+					strcpy( new_error->message, "It is not mnemonic or directive.");
+					new_error->next = NULL;
+					push_into_error_list( new_error );		
+					Assemble_State.error = TRUE;
+				}
+
+				else if( Assemble_State.start == FALSE ){
+					new_error = (error*)malloc(sizeof(error));
+					new_error->line = line_num;
+					strcpy( new_error->message, "Code must begin with START.");
+					new_error->next = NULL;
+					push_into_error_list( new_error );		
+					Assemble_State.error = TRUE;
+					Assemble_State.start = TRUE;
+				}
+
+				else if( Assemble_State.end == TRUE ){
+					new_error = (error*)malloc(sizeof(error));
+					new_error->line = line_num;
+					strcpy( new_error->message, "END must not have symbol.");
+					new_error->next = NULL;
+					push_into_error_list( new_error );		
+					Assemble_State.error = TRUE;
+				}
+
+				else{
+					write_interm( line_num, LOCCTR, arg_num, comment, token[0], token[1], ret , inst_num , token[2]);
+					LOCCTR += value;
+
+				}
+			}
+		}
+		line_num += 5;
+	}
+
+	if( Assemble_State.end == FALSE ){// Error
+		new_error = (error*)malloc(sizeof(error));
+		new_error->line = line_num;
+		strcpy( new_error->message, "not proper end of file.");
+		new_error->next = NULL;
+		push_into_error_list( new_error );		
+		Assemble_State.error = TRUE;
+	}
+	
+	fclose(fp);
+}
+
+void write_interm( int line_num, unsigned int LOCCTR, int arg_num, char comment[], char *symbol,  char *instruction, int inst_flag, int inst_num, char *operand){
+	
+	/* 	 Line_Num            LOCCTR            Symbol            (+)Instruction            (@,#)    Operand           Opcode
+	   |  4space  | 4space | 4space | 4space | 6space | 4space |     7space     | 3space | 1space | 9space | 4space | 8space | 
+	   [0]        [4]      [8]      [12]     [16]     [22]     [26]             [33]     [36]     [37]     [46]     [50]  
+	*/
+
+	int len;
+	FILE *fp;
+	char flag;
+
+	if( Assemble_State.error == TRUE )
+		return;
+
+	fp = fopen( Assemble_State.OutputFileName , "a");
+
+	if( arg_num == 0 ){
+		fprintf(fp, "%s", comment);
+		fclose(fp);
+		return;
+	}
+	//Write Line Num
+	Write_Hex(fp, (unsigned int)Line_num, 4);
+	Write_Blank(fp, 4);
+
+	// Write LOCCTR
+	Write_Hex(fp, LOCCTR, 4);
+	Write_Blank(fp, 4);
+
+	//Write SYMBOL
+	if( symbol != NULL ){
+		fprintf(fp, "%s", symbol);
+		len = 10 - strlen(symbol);
+	}
+	else
+		len = 10;
+	Write_Blank(fp, len);
+
+	//Write instruction
+	if( instruction != NULL ){
+		fprintf(fp, "%s", instruction);
+		len = 10 - strlen( instruction );
+	}
+	else
+		len = 10;
+	Write_Blank(fp, len);
+
+	//Write Operand
+	if( operand != NULL ){
+		len = strlen(operand);
+		flag = operand[0];
+		if(flag == '#' || flag == '@'){
+			fprintf(fp, "%s", operand);
+			len = 14 - len;
+		}
+		else{
+			fprintf(fp, " %s", operand);
+			len = 13 - len;
+		}
+	}
+	else
+		len = 14;
+	Write_Blank(fp, len );
+
+	// Write Directive or Format
+	Write_Hex( fp, (unsigned int)inst_flag, 1 );
+
+	// Write Dir_num or Opcode
+	Write_Hex( fp, (unsigned int)inst_num, 2 );
+
+	fprintf(fp, "\n");
+
+
+	fclose(fp);
+
+}
+int Is_Directive ( char *instruction , char *operand, unsigned int *inc, int line_num , int *dir_num){
+
 	char *start = "START";
 	char *byte = "BYTE";
 	char *word = "WORD";
@@ -84,312 +376,214 @@ int assem_pass1( char filename[] ){
 	char *base = "BASE";
 	char *nobase = "NOBASE";
 
-	int format;
-	int format_flag;
-
-	int len;
-	int arg_num;
-	int ret;
-	int end_flag;
-	int line_num = 5;
-	int i;
-
+	int state, i;
 	error *new_error;
-	int error_flag = FALSE;
+	unsigned int value;
+	int len;
+	int ret = Directive;
+	
+	if( strcmp( instruction, start ) == 0 ){// START
+		
+		Assemble_State.start = TRUE;
 
-	fp = fopen(filename,"r");
-	if( fp == NULL ){
-		Success = FALSE;
-		return 0;
-	}
-
-	len = strlen( filename );
-	strncpy(lst_name, filename, len-4 );
-	lst_name[len-4] = '\0';
-	strcat(lst_name, extend);
-	fp2 = fopen(lst_name,"w");
-	fclose(fp2);
-
-	erase_symtab();
-
-	while(TRUE){
-
-		comment[0] = '\0';
-		symbol[0] = '\0';
-		mnemonic[0] = '\0';
-		operand[0] = '\0';
-		arg_num = read_one_line(fp, comment, symbol, mnemonic, operand);
-
-		format_flag = FALSE;
-
-		if( error_flag == FALSE )
-			write_lst(lst_name, LOCCTR, arg_num, comment, symbol, mnemonic, operand);
-
-		if( arg_num  == Excess ){// Error
-			
-			new_error = (error*)malloc(sizeof(error));
-			new_error->line = line_num;
-			strcpy( new_error->message, "Improper number of columns");
-			new_error->next = NULL;
-			push_into_error_list( new_error );
-			error_flag = TRUE;
-			line_num += 5;
-			continue;
+		if( operand == NULL){
+			*inc = 0;
+			value = 0;
 		}
-
-		else if( arg_num == Blank ){
-			line_num += 5;
-			continue;
-		}
-
-		else if( arg_num == Eof )
-			break;
-
-		else if( strcmp(mnemonic,start) == 0 ){// START
-
-			ret = Str_convert_into_Hex(operand, &value);
-			if( ret == FALSE){
+		else{
+			state = Str_convert_into_Hex(operand, &value);
+			if( state == FALSE){
 				new_error = (error*)malloc(sizeof(error));
 				new_error->line = line_num;
 				strcpy( new_error->message, "operand has wrong character.");
 				new_error->next = NULL;
 				push_into_error_list( new_error );		
-				error_flag = TRUE;
+				Assemble_State.error = TRUE;
 			}
 			else
-				LOCCTR = value;
-			line_num += 5;
-			continue;
+				*inc = value;
 		}
-
-		if( arg_num == 3 ){//  Make SYMTAB
-			ret = push_symbol(symbol, LOCCTR);
-			if( ret == FALSE ){
-				new_error = (error*)malloc(sizeof(error));
-				new_error->line = line_num;
-				strcpy( new_error->message, "fail to make SYMTAB.");
-				new_error->next = NULL;
-				push_into_error_list( new_error );		
-				error_flag = TRUE;
-				line_num += 5;
-				continue;
-			}
+		
+		ret = push_symbol( instruction, value );
+		if( ret == FALSE ){
+			new_error = (error*)malloc(sizeof(error));
+			new_error->line = line_num;
+			strcpy( new_error->message, "fail to make SYMTAB.");
+			new_error->next = NULL;
+			push_into_error_list( new_error );		
+			Assemble_State.error = TRUE;
 		}
-		if( arg_num != Comment ){// Judge proper mnemonic
+		*inst_num = START;
+	}
+	else if( strcmp( instruction, end) == 0 ){// END
+		Assemble_State.end = TRUE;
+		*inst_num = END;
+	}
 
-			if( mnemonic[0] == '+' ){
-				format_flag = TRUE;
-				strcpy(mnemonic, mnemonic + 1 );
-			}
+	else if( strcmp( instruction, base) == 0 ){// BASE
+		*inc = 0;
+		*inst_num = BASE;
+	}
+	else if( strcmp( instruction, nobase) == 0 ){// NOBASE
+		*inc = 0;	
+		*inst_num = NOBASE;
+	}
+		
+	else if( strcmp( instruction, byte) == 0 ){// BYTE
+		len = strlen( operand );
+		if( operand[1] != '\'' || operand[len-1] != '\'' )
+			Assemble_State.error = TRUE;
+		if( operand[0] == 'C'){
+			*inc = ( len - 3 );
+		}	
+		else if( operand[0] == 'X'){
+			len -= 3;
+			len = ( len + 1 ) / 2;
+			*inc = len;
+		}
+		*inst_num = BYTE;
+	}
 
-			format = find_opcode( mnemonic );
+	else if( strcmp( instruction, word ) == 0 ){// WORD
+		*inc = 3;
+		*inst_num = WORD;
+	}
 
-			if( format != 0){
-				switch( format ){
-					case 1: LOCCTR += 1; break;
-					case 2: LOCCTR += 2; break;
-					case 3: {
-								if( format_flag == TRUE )
-									LOCCTR += 4;
-								else
-									LOCCTR += 3;
-								break;
-							}
-				}
-			}
-			else if( strcmp( mnemonic, end) == 0 ){// END
-				end_flag = TRUE;
-			}
-			else if( strcmp( mnemonic, base) == 0 || strcmp( mnemonic, nobase) == 0 ){ // BASE;NOBASE
-				line_num += 5;
-				continue;
-			}
-			else if( strcmp( mnemonic, byte) == 0 ){// BYTE
-				len = strlen( operand );
-				if( operand[1] != 39 || operand[len-1] != 39)
-					error_flag = TRUE;
-				if( operand[0] == 'C'){
-					len -= 3;
-					LOCCTR += len;
-				}
-				else if( operand[0] == 'X'){
-					len -= 3;
-					len = ( len + 1 ) / 2;
-					LOCCTR += len;
-				}
-				// I don't know how to deal with decimal...?
-			}
-			else if( strcmp( mnemonic, word ) == 0 ){// WORD
-				LOCCTR += 3;
-			}
-			else if( ( strcmp( mnemonic, resb ) && strcmp( mnemonic, resw )) != 0 ){// mnemonic error
-					new_error = (error*)malloc(sizeof(error));
-					new_error->line = line_num;
-					strcpy( new_error->message, "mnemonic has wrong character.");
-					new_error->next = NULL;
-					push_into_error_list( new_error );
-					error_flag = TRUE;
+	else if( ( strcmp( instruction, resb ) && strcmp( instruction, resw )) != 0 ){// mnemonic error
+		ret = Nothing;
+	}
+	else{
+		len = strlen(operand);
+		value = 0;
+		state = TRUE;
+		for( i = 0; i < len ; i++ ){
+			if( operand[i] >= '0' && operand[i] <= '9' ){
+				value *= 10;
+				value += (unsigned int)( operand[i] - '0' );
 			}
 			else{
-				// OPERAND -> DEC
-				if( operand[0] == '#' || operand[0] == '@' ){
-					strcpy( operand, operand + 1 );
-				}
-				len = strlen(operand);
-				value = 0;
-				ret = TRUE;
-				for( i = 0; i < len ; i++ ){
-					if( operand[i] >= '0' && operand[i] <= '9' ){
-						value *= 10;
-						value += (unsigned int)( operand[i] - '0' );
-					}
-					else{
-						ret = FALSE;
-						break;
-					}
-				}
-				
-				if( ret == FALSE ){//error
-					new_error = (error*)malloc(sizeof(error));
-					new_error->line = line_num;
-					strcpy( new_error->message, "operand has wrong character.");
-					new_error->next = NULL;
-					push_into_error_list( new_error );
-					error_flag = TRUE;
-					line_num += 5;
-					continue;
-				}
-				if( strcmp( mnemonic, resb) == 0 ){// RESB
-					LOCCTR += value;
-				}
-				else if( strcmp( mnemonic, resw) == 0 ){// RESW
-					LOCCTR += ( 3 * value );
-				}
+				state = FALSE;
+				break;
 			}
-		} 
-		line_num += 5;
+		}			
+		if( state == FALSE ){//error
+			new_error = (error*)malloc(sizeof(error));
+			new_error->line = line_num;
+			strcpy( new_error->message, "operand has wrong character.");
+			new_error->next = NULL;
+			push_into_error_list( new_error );
+			Assemble_State.error = TRUE;
+		}
+		else if( strcmp( instruction , resb) == 0 ){// RESB
+			*inc= value;
+			*inst_num = RESB;
+		}
+		else if( strcmp( instruction , resw) == 0 ){// RESW
+			*inc = ( 3 * value );
+			*inst_num = RESW;
+		}
 	}
+	return ret;
+}
 
-	if(!end_flag){//Error
-		error_flag = TRUE;
+int Is_Mnemonic( char *mnemonic , char *operand, unsigned int *inc, int line_num, int *opcode){
+
+	char revise_mne[10];
+	char blank[2];
+
+	error *new_error;
+
+	int format;
+	int ret = 0;
+	int format_flag = FALSE;
+
+	if( mnemonic[0] == '+' ){
+		strcpy( revise_mne, mnemonic+1 );
+		format_flag = TRUE;
+	}
+	else
+		strcpy( revise_mne, mnemonic );
+		
+	format = find_opcode( revise_mne, opcode );
+
+	if( opcode < 0 )// Cannot find in OPTAB
+		return ret;
+
+	if( format < 3 && format_flag == TRUE ){
 		new_error = (error*)malloc(sizeof(error));
 		new_error->line = line_num;
-		strcpy( new_error->message, "not proper end of file.");
+		strcpy( new_error->message, "This mnemonic doesn't have format 4.");
 		new_error->next = NULL;
 		push_into_error_list( new_error );		
-		error_flag = TRUE;
+		Assemble_State.error = TRUE;
+		return ret;
 	}
 	
-	fclose(fp);
-	return error_flag;
+	switch( format ){
+		case 1: {
+					if( operand != NULL){
+						new_error = (error*)malloc(sizeof(error));
+						new_error->line = line_num;
+						strcpy( new_error->message, "This mnemonic must not have operand.");
+						new_error->next = NULL;
+						push_into_error_list( new_error );		
+						Assemble_State.error = TRUE;
+					}
+					*inc = 1;
+					ret = Format1;
+					break;
+				}
+		case 2: {
+					if( operand == NULL ){
+						new_error = (error*)malloc(sizeof(error));
+						new_error->line = line_num;
+						strcpy( new_error->message, "This mnemonic must have operand.");
+						new_error->next = NULL;
+						push_into_error_list( new_error );		
+						Assemble_State.error = TRUE;
+					}
+					*inc = 2;
+					ret = Format2;
+					break;
+				}
+		case 3: {
+					if( operand == NULL && strcmp( revise_mne, "RSUB" ) != 0 ){
+						new_error = (error*)malloc(sizeof(error));
+						new_error->line = line_num;
+						strcpy( new_error->message, "This mnemonic must have operand.");
+						new_error->next = NULL;
+						push_into_error_list( new_error );		
+						Assemble_State.error = TRUE;
+					}
+					if( format_flag == TRUE ){
+						*inc = 4;
+						ret = Format4;
+					}
+					else{
+						*inc = 3;
+						ret = Format3;
+					}
+					break;
+				}
+	}
+	return ret;
 }
 
-void assem_pass2(){
-}
-
-void write_lst( char lst_name[], unsigned int LOCCTR, int arg_num, char comment[], char symbol[],  char mnemonic[], char operand[]){
-	
-	int len;
-	FILE *fp;
-	char flag;
-
-	fp = fopen(lst_name, "a");
-
-	if( arg_num == Comment){
-		fprintf(fp, "%s", comment);
-		fclose(fp);
-		return;
-	}
-	else if( arg_num < 1 || arg_num > 3){
-		fclose(fp);
-		return;
-	}
-	
-	Write_Hex(fp, LOCCTR, 4);
-	Write_Blank(fp, 4);
-	fprintf(fp, "%s", symbol);
-	len = 10 - strlen(symbol);
-	Write_Blank(fp, len);
-	fprintf(fp, "%s", mnemonic);
-	len = 9 - strlen(mnemonic);
-	Write_Blank(fp, len);
-	flag = operand[0];
-	if(flag == '#' || flag == '@')
-		fprintf(fp, "%s\n", operand);
-	else
-		fprintf(fp, " %s\n", operand);
-	fclose(fp);
-
-}
-
-int read_one_line(FILE *fp, char comment[], char symbol[],  char mnemonic[], char operand[]){
-	char line[200];
-	char *pt;
-	char *tmp[4];
-	int arg_num = 0;
-	int len;
-
-	pt = fgets(line, 200, fp);
-	if(pt == NULL)
-		return Eof;
-
-	strcpy( comment, line);
-
-	tmp[arg_num] = strtok( line, "\t\n ");
-	while( tmp[arg_num] != NULL ){
-		len = strlen( tmp[arg_num] );
-		if( len >= 2 && tmp[arg_num][len-1] == ','){
-			pt = strtok(NULL, "\t\n");
-			if( pt != NULL )
-				strcat(tmp[arg_num],pt);
-		}
-		arg_num++;
-		if( arg_num >3 )
-			break;
-		tmp[arg_num] = strtok(NULL,"\t\n ");
-	}
-
-	if(arg_num == 0)
-		return Blank;
-
-	if( tmp[0][0] == '.' ){// Case: Comment
-		mnemonic[0] = '.';
-		return Comment;
-	}
-
-	switch( arg_num ){
-		case 1:{
-				   strcpy( mnemonic, tmp[0]);
-				   break;
-			   }
-		case 2:{
-				   if( strcmp( mnemonic, "RSUB") == 0 ){
-					   strcpy( symbol, tmp[0] );
-					   strcpy( mnemonic, tmp[1] );
-				   }
-				   else{
-					   strcpy(mnemonic, tmp[0]);
-				   	   strcpy(operand, tmp[1]);
-				   }
-				   break;
-			   }
-		case 3:{
-				   strcpy(symbol, tmp[0]);
-				   strcpy(mnemonic, tmp[1]);
-				   strcpy(operand, tmp[2]);
-			   }
-	}
-	return arg_num;
-}
-
-int push_symbol( char symbol[], unsigned int LOCCTR ){
+int push_symbol( char *symbol, unsigned int LOCCTR ){
 
 	int ret = TRUE;
 	symbol_info *new_sym;
 	symbol_info *pre, *cur;
 	int Hash_value;
+	int idx, len;
 
-	new_sym = (symbol_info *)malloc(sizeof(symbol_info));
+	// Is symbol consist of Upper Alphabet?
+	len = strlen( symbol );
+	for( idx = 0; idx < len; idx++ )
+		if( symbol[idx] < 'A' || symbol[idx] > 'Z' )
+			return FALSE;
+
+	new_sym = (symbol_info *)malloc( sizeof(symbol_info) );
 	if( new_sym == NULL ){
 		return FALSE;
 	}
@@ -423,7 +617,195 @@ int push_symbol( char symbol[], unsigned int LOCCTR ){
 	return ret;
 }
 
+int Find_Symbol( char *symbol, unsigned int *target_addr ){
+
+	symbol_info *cur;
+	int Hash_value;
+	int ret = FALSE;
+	int state;
+
+	Hash_value = Hash_func( symbol );
+	
+	cur = SYMTAB[Hash_value];
+	while( cur != NULL ){
+		state = strcmp( symbol, cur->name);
+		if( state == -1 )
+			cur = cur->next;
+		else if( state == 0 ){
+			ret = TRUE;
+			*target_addr = cur->address;
+			break;
+		}
+	}
+	return ret;
+}
+
+void assem_pass2(char filename[], int code_len ){
+
+	FILE *fp;
+	FILE *fp2;
+	
+
+
+	char operand[10];
+	unsigned int NI;
+	int inst_flag;
+	char inst_num[2];
+	char object_code[200];
+	char tmp[5];
+
+	char line[200];
+	char *pt;
+	
+	int len;
+	unsigned int line_num=5;
+	unsigned int next_line_num;
+	unsigned int LOCCTR;
+	unsigned int PC;
+
+	error *new_error;
+
+	fp = fopen(Assemble_State.OutputFileName, "r" );
+	if( fp == NULL ){		
+		new_error = (error*)malloc(sizeof(error));
+		new_error->line = line_num;
+		strcpy( new_error->message, "Intermediate file doesn't exist.");
+		new_error->next = NULL;
+		push_into_error_list( new_error );		
+		Assemble_State.error = TRUE;
+		return;
+	}
+
+	// outputfile initialize
+	len = strlen( filename );
+	len -= 4;
+	filename[len] = '\0';
+	
+	strcpy( Assemble_State.OutputFileName, filename );
+	strcpy( Assemble_State.OutputFileName2, filename );
+	strcat( Assemble_State.OutputFileName, ".lst" );
+	strcat( Assemble_State.OutputFileName2, ".obj");
+	fp2 = fopen( Assemble_State.OutputFileName, "w");
+	fclose( fp2 );
+	fp2 = fopen( Assemble_State.OutputFileName2, "w");
+	fclose( fp2 );
+
+	// Make Header Code
+
+	pt = fgets(line,200, fp);
+	if( pt == NULL){
+		new_error = (error*)malloc(sizeof(error));
+		new_error->line = line_num;
+		strcpy( new_error->message, "Intermediate file is empty.");
+		new_error->next = NULL;
+		push_into_error_list( new_error );		
+		Assemble_State.error = TRUE;
+		return;
+	}
+
+	// Get PC
+	Get_Token( line, tmp, 8, 12 );
+	Str_convert_into_Hex( tmp, &PC );
+
+	while(TRUE){
+
+		// Get LOCCTR
+		LOCCTR = PC;
+
+		// Get line number
+		Get_Token( line, tmp, 0, 4);
+		Str_convert_into_Hex( tmp, &next_line_num );
+
+		// N I flag set
+		NI = 1;
+		if( line[36] == '@' )
+			NI = NI<<1;
+		else if( line[36] != '#' ){
+			NI = NI<<1;
+			NI += 1;
+		}
+
+		// Get operand
+		Get_Token( line, operand, 37, 46 );
+
+		// Get Instruction flag
+		inst_flag = line[50]-'0';
+
+		// Get Instruction num
+		Get_Token( line, inst_num, 51,53 );
+
+		while( TRUE ){
+			pt = fgets( line, 200, fp );
+			if( pt == NULL )
+				break;
+			if( line[0] != '.' )
+				break;
+			Write_lst( line, 0, FALSE);
+		}
+		
+		// Get PC
+		Get_Token( line, tmp, 8, 12 );
+		Str_convert_into_Hex( tmp, &PC );
+
+		Make_Object_Code( operand, NI, inst_flag, inst_num, 	
+
+	
+
+
+
+}
+
+void Get_Token( char line[], char store[], int start_idx, int end_idx){
+	int i;
+	int idx = 0;
+
+	for( i = start_idx ; i < end_idx ; i++, idx++ ){
+		if( line[i] == ' ')
+			break;
+		store[idx] = line[i];
+	}
+	store[idx] = '\0';	
+}
+
+void Write_lst( char line[] , int LOC_chg, int ObjectCode){
+
+	FILE *fp;
+	fp = fopen( Assemble_State.OutputFileName, "a" );
+
+	if( line[0] == '.' ){
+		Write_Blank( fp, 4 );
+		fprintf(fp, "%s", comment );
+		fclose(fp);
+		return;
+	}
+
+	if( ObjectCode == False){
+
+		line[50] = '\0';
+
+		if( LOC_chg == 0 ){
+			line = line + 8;
+			Write_Blank( fp, 4 );
+			fprintf(fp, "%s", line);
+		}
+		else{
+			line = line + 4;
+			fprintf(fp, "%s", line);
+		}
+	}
+	else{
+
+		fprintf(fp,"\n");
+	}
+
+	fclose(fp);
+
+}
+int Make_Object_Code(){
+}
+
 void push_into_error_list(error *cur){
+	
 	if( Error_list_head == NULL ){
 		Error_list_head = cur;
 		Error_list_tail = cur;
@@ -434,7 +816,7 @@ void push_into_error_list(error *cur){
 	}
 }
 
-int find_opcode( char mnemonic[] ){
+int find_opcode( char mnemonic[], int *opcode){
 	int adr;
 	int format;
 	opcode_info *cur;
@@ -452,7 +834,9 @@ int find_opcode( char mnemonic[] ){
 		return FALSE;
 	}
 
-	for( format = 0; format < 4; format++ )
+	*opcode = (int)cur->opcode;
+	
+	for( format = 1; format <= 4; format++ )
 		if( cur->format[format] == 1 )
 			break;
 	return format;

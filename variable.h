@@ -21,7 +21,12 @@ symbol_info* SYMTAB[SYMBOL_TABLE_SIZE];
 error *Error_list_head;
 error *Error_list_tail;
 
+//For assembler
+assemble_flags Assemble_State;
+object_program Object_file_State;
+
 //Flag for exit program
 int Exit_flag;
+
 //Flag for success input
 int Success;

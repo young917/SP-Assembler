@@ -34,9 +34,12 @@ int main (void){
 
 //********************Initialization***********************
 void Init(){
+	int i;
+
 	Exit_flag = FALSE;
 	History_Head = NULL;
 	Error_list_tail = Error_list_tail = NULL;
+
 	Memory = (unsigned char *)calloc(MEM_SIZE,sizeof(unsigned char));
 	if(Memory == NULL){
 		Exit_flag = TRUE;
@@ -72,8 +75,14 @@ void Init(){
 	command_list[11][1] = "\0";
 	command_list[12][0] = "symbol";
 	command_list[12][1] = "\0";
+	
 	//Make Hash Table//
 	Make_hash_table();
+
+	//Initialize SYMTAB
+	for( i = 0; i < SYMBOL_TABLE_SIZE ; i++ )
+		SYMTAB[i] = NULL;
+
 }
 
 //************ Relate to Hash Table *********************
@@ -111,9 +120,6 @@ void Make_hash_table(){//Make Hash Table
 	//Initialize Hash Table
 	for(i = 0; i < HASH_TABLE_SIZE ; i++)
 		Hash_Table[i] = NULL;
-
-	for(i = 0; i< SYMBOL_TABLE_SIZE ; i++)
-		SYMTAB[i] = NULL;
 
 	//Open File
 	fp = fopen("opcode.txt","r");
@@ -153,10 +159,10 @@ void Make_hash_table(){//Make Hash Table
 
 		// Get formant
 		Handling_Input( Store_input, line, format, 3, FALSE);
-		for(i = 0,j = 0; i<4 ; i++){
+		for(i = 1,j = 0; i <= 4 ; i++){
 			if((format[j] - '0') == i){
 				if(format[j+1] != '\0')
-					j+=2;
+					j += 2;
 				new_info->format[i] = 1;
 			}
 			else
@@ -569,7 +575,7 @@ void show_content(){
 	
 	stat(filename, &file_info);
 	file_kind = file_info.st_mode & S_IFMT;
-	if( file_kind == S_IFDIR ){
+	if( file_kind == S_IFDIR ){// Directory case: Error
 		Success = FALSE;
 		return;
 	}

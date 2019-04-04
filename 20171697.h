@@ -18,14 +18,17 @@
 enum Command{
 	Help, Dir, Quit, History, Dump, Edit, Fill, Reset, Opcode, Opcodelist, Assemble, Type, Symbol, Etc
 };
-enum Mode{
+enum MODE{
 	Store_input, Erase_space
 };
-enum CharType{
+enum CHARTYPE{
 	ENTER = 1, COMMA, CHAR, BLANK
 };
-enum argument{
-	Eof = -2, Blank, Comment, One, Two, Three, Excess
+enum DIRECTIVE{
+	START=1, END, BYTE, WORD, RESB, RESW, BASE, NOBASE
+};
+enum Instruction{
+	Nothing = -1, Directive, Format1, Format2, Format3, Format4
 };
 
 //  Structure for storing past command
@@ -38,7 +41,7 @@ typedef struct input{
 typedef struct opcode_info{
 	char mnemonics[7];
 	unsigned char opcode;
-	int format[4];
+	int format[5];
 	struct opcode_info *next;
 }opcode_info;
 
@@ -56,12 +59,31 @@ typedef struct error{
 	struct error *next;
 }error;
 
+// Structure for assembler
+typedef struct assemble_flags{
+	int start;
+	int end;
+	int error;
+	int base;
+	char OutputFileName[100];
+	char OutputFileName2[100];
+
+}assemble_flags;
+
+// Structure for Object code Writer
+typedef struct object_program{
+	char code[70];
+	int current_col;
+	unsigned int modify_record[500];
+}object_program;
+
+
 void Init();
 int Hash_func(char mnemonics[]);
 void Make_hash_table();
 int Get_Command();
 
-//Execute command
+// Execute command
 void help(); 
 void show_files(); //dir
 void quit();
@@ -74,16 +96,20 @@ void opcode();
 void opcodelist();
 void show_content();
 void assemble();
-int assem_pass1( char filename[] );
+
+// Assemble
+void assem_pass1( char filename[] );
 void show_error_list();
-void write_lst( char filename[], unsigned int LOCCTR, int arg_num, char comment[], char symbol[],  char mnemonic[], char operand[]);
-int read_one_line(FILE *fp, char comment[], char symbol[],  char mnemonic[], char operand[]);
+void write_interm( unsigned int LOCCTR, int arg_num, char comment[], char *symbol,  char *mnemonic, int inst_flag, int num, char *operand);
+int Is_Directive ( char *instruction , char *operand, unsigned int *inc, int line_num , int *dir_num );
+int Is_Mnemonic( char *mnemonic , char *operand, unsigned int *inc, int line_num, int*opcode);
 int push_symbol( char symbol[], unsigned int LOCCTR );
 void push_into_error_list( error *cur);
-int find_opcode( char mne[] );
+int find_opcode( char mne[], int *opcode);
 void assem_pass2();
 
-//Manage input string
+
+// Manage input string
 int Str_convert_into_Hex( char str[], unsigned int *num);
 void Hex_convert_into_Str( unsigned int num, int len);
 int Handling_Input( int mode, char input_str[], char str[], int len, int HEXA);
