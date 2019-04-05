@@ -111,10 +111,11 @@ void Make_hash_table(){//Make Hash Table
 	char hex_str[3];
 	char format[4];
 	FILE *fp;
-	int i,j;
+	int i,j, tmp;
 	int store_adr;
 	char *ret;
 	unsigned int opc;
+	unsigned int inst_type = _OPCODE;
 	opcode_info *new_info;
 
 	//Initialize Hash Table
@@ -157,21 +158,68 @@ void Make_hash_table(){//Make Hash Table
 		// Ignore space
 		Handling_Input( Erase_space, line, NULL, 0 , FALSE);
 
-		// Get formant
+		// Get format
 		Handling_Input( Store_input, line, format, 3, FALSE);
-		for(i = 1,j = 0; i <= 4 ; i++){
-			if((format[j] - '0') == i){
-				if(format[j+1] != '\0')
-					j += 2;
-				new_info->format[i] = 1;
+		inst_type = _OPCODE;
+
+		i = 0;
+		while( i <= 2){
+
+			if( i == 1 && format[1] == '/' )
+				i = 2;
+			else if( i == 1 )
+				break;
+
+			tmp = format[i] - '0';
+			switch( tmp ){
+				case 1: {
+							inst_type = inst_type | _FORMAT_1;
+							inst_type = inst_type | _NO_OPERAND;
+							break;
+						}
+
+				case 2: {
+							inst_type = inst_type | _FORMAT_2;
+							if( opc == 0xB4 || opc == 0xB8 )
+								inst_type = inst_type | _ONE_REG;
+
+							else if( opc == 0xB0 )
+								inst_type = inst_type | _ONE_DEC;
+
+							else if( opc == 0xA4 || opc == 0xA8 )
+								inst_type = inst_type | _ONE_REG_ONE_DEC;
+
+							else
+								inst_type = inst_type | _TWO_REG;
+							break;
+						}
+
+				case 3: {
+							inst_type = inst_type | _FORMAT_3;
+							if( opc == 0x4C )
+								inst_type = inst_type | _NO_OPERAND;
+							else
+								inst_type = inst_type | _ONE_MEM;
+							break;
+						}
+
+				case 4: {
+							inst_type = inst_type | _FORMAT_4;
+							if( opc == 0x4C )
+								inst_type = inst_type | _NO_OPERAND;
+							else
+								inst_type = inst_type | _ONE_MEM;
+							break;
+						}
 			}
-			else
-				new_info->format[i] = 0;
+			i++;
 		}
+		new_info->type = inst_type;
 
 		//Store in the Hash Table
 		new_info->next = Hash_Table[store_adr];
 		Hash_Table[store_adr] = new_info;
+
 	}
 	fclose(fp);
 }

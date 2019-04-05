@@ -1,6 +1,7 @@
 #include "20171697.h"
 #include "variable.h"
 
+//---------------- ASSEMBLE MAIN ----------------------------
 void assemble(){
 	char filename[100];
 	char lstname[100];
@@ -15,36 +16,46 @@ void assemble(){
 	}
 
 	// Initailize
-	Assemble_State.start = FALSE;
-	Assemble_State.end = FALSE;
-	Assemble_State.error = FALSE;
-	Assemble_State.base = FALSE;
+	ASBL.Flags.start = -1;
+	ASBL.Flags.end = FALSE;
+	ASBL.Flags.error = FALSE;
+	ASBL.LOCCTR = 0;
+	ASBL.Line_num = 5;	
 	erase_symtab();
 
+	// Pass1
 	code_len = assem_pass1(filename);
 	
-	if( Assemble_State.error == TRUE ){
+	if( ASBL.Flags.error == TRUE ){
 		show_error_list();
 		
-		remove(Assemble_State.OutputFileName);
+	//	remove(ASBL.Output);
 
 		erase_symtab();
 		Success = FALSE;
+
 		return;
 	}
 
+	// Initialize
+	ASBL.Flags.end = FALSE;
+	ASBL.Flags.base = -1;
+	ASBL.LOCCTR = 0;
+	ASBL.Line_num = 5;	
+	initial_reg( reg );
+	OBJ.Output[0] = '\0';
+	OBJ.current_col = 0;
+	OBJ.modify_num = 0;
+
+
+	// Pass2
 	assem_pass2(filename, code_len );
 	
-	if( Assemble_State.error == TRUE ){
+	if( ASBL.Flags.error == TRUE ){
 		show_error_list();
 
-		remove(Assemble_State.OutputFileName);
-
-		len = strlen( filename );
-		strncpy(lstname, filename, len-4);
-		lstname[len-4] = '\0';
-		strcat(lstname, ".lst");
-		remove(lstname);
+	//	remove(ASBL.Output);
+	//	remove(OBJ.Output);
 
 		erase_symtab();
 		Success = FALSE;
@@ -52,37 +63,9 @@ void assemble(){
 	}
 }
 
-void erase_symtab(){
-	int idx;
-	symbol_info *present;
-	symbol_info *next;
 
-	for( idx = 0; idx < SYMBOL_TABLE_SIZE ; idx++ ){
-		present = next = SYMTAB[idx];
-		while( next != NULL ){
-			present = next;
-			next = present->next;
-			free(present);
-			present = NULL;
-		}
-	}
-}
-
-void show_error_list(){// And erase
-	error *cur, *pre;
-
-	pre = cur = Error_list_head;
-	while( cur != NULL ){
-		pre = cur;
-		cur = pre->next;
-		printf("line	%d	:	%s\n", pre->line, pre->message);
-		free(pre);
-		pre = NULL;
-	}
-
-}
-
-void assem_pass1( char filename[] ){
+// ---------------------- PASS 1 ------------------------------
+int assem_pass1( char filename[] ){
 	//return error_flag
 
 	FILE *fp;
@@ -99,37 +82,35 @@ void assem_pass1( char filename[] ){
 	char *tmp;
 
 	unsigned int value = 0;
-	unsigned int LOCCTR = 0;
+	unsigned int inst_type;
 
-	int len, ret;
-	int inst_num;
-	int line_num = 5;
-	int i;
-	error *new_error;
+	int len, i, ret;
+
 
 	fp = fopen(filename,"r");
 	if( fp == NULL ){
 		Success = FALSE;
-		Assemble_State.error = TRUE;
-		return;
+		ASBL.Flags.error = TRUE;
+		return 0;
 	}
 
-	strcpy( Assemble_State.OutputFileName, filename );
-	strcat( Assemble_State.OutputFileName, ".txt" );
-	fp2 = fopen( Assemble_State.OutputFileName, "w" );
+	strcpy( ASBL.Output, filename );
+	strcat( ASBL.Output, ".txt" );
+	fp2 = fopen( ASBL.Output, "w" );
 	fclose( fp2 );
 
 	while(TRUE){
 
-		arg_num = 0;
-
 		pt = fgets(line, 200, fp);
+
 		if(pt == NULL)// FILE END
 			break;
-
 		comment[0] = '\0';
 		strcpy( comment, line );
 
+
+		// Tokenize
+		arg_num = 0;
 		token[arg_num] = strtok( line, "\t\n ");
 		while ( token[arg_num] != NULL ){
 
@@ -151,171 +132,437 @@ void assem_pass1( char filename[] ){
 			token[arg_num] = strtok( NULL, "\t\n ");
 		}
 
+		// Comment
 		if( token[0] != NULL && token[0][0] == '.' ){// COMMENT
-			write_interm( line_num, LOCCTR, 0, comment, blank, blank, FALSE, 0,blank );
-			line_num += 5;
+			write_interm( 0, comment, blank, blank, blank );
+			ASBL.Line_num += 5;
 			continue;
 		}
 		
-		else if( arg_num == 0 ){// BLANK
-			line_num += 5;
+		// Blank Line
+		else if( arg_num == 0 ){
+			ASBL.Line_num += 5;
 			continue;
 		}
 
-		else if( Assemble_State.end == TRUE ){
-			new_error = (error*)malloc(sizeof(error));
-			new_error->line = line_num;
-			strcpy( new_error->message, "After END, There exist more code.");
-			new_error->next = NULL;				
-			push_into_error_list( new_error );		
-			Assemble_State.error = TRUE;
+		// Error
+		else if( ASBL.Flags.end == TRUE ){
+			Push_into_error_list( "After END, there exists more instructions.");
 			break;
 		}
 
 		tmp = strtok( NULL, "\t\n ");
 		if( (tmp != NULL) ){// Excess : token more than 3
-			new_error = (error*)malloc(sizeof(error));
-			new_error->line = line_num;
-			strcpy( new_error->message, "Improper number of columns");
-			new_error->next = NULL;
-			push_into_error_list( new_error );
-			Assemble_State.error = TRUE;
-			line_num += 5;
+
+			Push_into_error_list( "Improper number of columns");
+			ASBL.Line_num += 5;
+
 			continue;
 		}
 
-		ret = Is_Mnemonic( token[0], token[1] , &value , line_num, &inst_num);
-		if( ret == 0 )
-			ret = Is_Directive(  token[0], token[1] , &value , line_num, &inst_num );
+		
+		// Without Symbol instruction check
+		inst_type = Is_Mnemonic( token[0], token[1] , &value );
+		if( (inst_type & _INST_INFO) == _NOTHING )
+			inst_type = Is_Directive( token[0], token[1] , &value );
 
-		if( ret != Nothing ){
+		if( (inst_type & _INST_INFO) != _NOTHING ){
 
-			if( Assemble_State.start == FALSE ){// START doesn't exist
-				new_error = (error*)malloc(sizeof(error));
-				new_error->line = line_num;
-				strcpy( new_error->message, "Code must begin with START.");
-				new_error->next = NULL;
-				push_into_error_list( new_error );		
-				Assemble_State.error = TRUE;
-				Assemble_State.start = TRUE;
+			// error
+			if( ASBL.Flags.start == -1 ){// START doesn't exist
+				Push_into_error_list ( "Code must begin with START.");
+				ASBL.Flags.start = 0;
 			}
 
-			else if( arg_num > 2 ){// Too much Operand
-				new_error = (error*)malloc(sizeof(error));
-				new_error->line = line_num;
-				strcpy( new_error->message, "This line has too many arguments.");
-				new_error->next = NULL;
-				push_into_error_list( new_error );		
-				Assemble_State.error = TRUE;
-			}
-			else if( (ret == Directive) && ( inst_num == BYTE || inst_num == WORD || inst_num == RESB || inst_num == RESW )){
-				new_error = (error*)malloc(sizeof(error));
-				new_error->line = line_num;
-				strcpy( new_error->message, " This line must have Label.");
-				new_error->next = NULL;
-				push_into_error_list( new_error );		
-				Assemble_State.error = TRUE;
-			}
+			else if( arg_num > 2 )// Too much Operand
+				Push_into_error_list ( "This line has too many arguments.");
+
+			else if( ( inst_type & _INST_INFO ) == _SYMBOL )// Need Symbol
+				Push_into_error_list( " This line must have Label.");
+
+			// Write
 			else{
-				write_interm( line_num, LOCCTR, arg_num, comment, blank, token[0], ret , inst_num , token[1]);
-				LOCCTR += value;
+				write_interm( arg_num, comment, blank, token[0], token[1]);
+				ASBL.LOCCTR += value;
 			}
 		}
+
+		// With Symbol
 		else{
-			// SYMBOL
-			ret = push_symbol( token[0] , LOCCTR );
-			if( ret == FALSE ){
-				new_error = (error*)malloc(sizeof(error));
-				new_error->line = line_num;
-				strcpy( new_error->message, "fail to push into SYMTAB.");
-				new_error->next = NULL;
-				push_into_error_list( new_error );		
-				Assemble_State.error = TRUE;
-			}
+
+			// Store SYMBOL
+			ret = push_symbol( token[0] , ASBL.LOCCTR );
+			if( ret == FALSE )
+				Push_into_error_list( "fail to push into SYMTAB.");
 
 			else{
 
-				ret = Is_Mnemonic( token[1], token[2], &value, line_num, &inst_num);
-				if( ret == 0)
-					ret = Is_Directive(  token[1], token[2] , &value , line_num, &inst_num);
+				// Instruction Check
+				inst_type = Is_Mnemonic( token[1], token[2], &value);
+				if( ( inst_type & _INST_INFO ) == _NOTHING )
+					inst_type = Is_Directive( token[1], token[2] , &value);
 
-				if( ret == Nothing ) {
-					new_error = (error*)malloc(sizeof(error));
-					new_error->line = line_num;
-					strcpy( new_error->message, "It is not mnemonic or directive.");
-					new_error->next = NULL;
-					push_into_error_list( new_error );		
-					Assemble_State.error = TRUE;
+				// error
+				if( ( inst_type & _INST_INFO ) == _NOTHING )
+					Push_into_error_list("It is not mnemonic or directive.");
+			
+				else if( ASBL.Flags.start == -1){
+					Push_into_error_list("Code must begin with START.");
+					ASBL.Flags.start = 0;
 				}
 
-				else if( Assemble_State.start == FALSE ){
-					new_error = (error*)malloc(sizeof(error));
-					new_error->line = line_num;
-					strcpy( new_error->message, "Code must begin with START.");
-					new_error->next = NULL;
-					push_into_error_list( new_error );		
-					Assemble_State.error = TRUE;
-					Assemble_State.start = TRUE;
-				}
+				else if( ASBL.Flags.end == TRUE )
+					Push_into_error_list("END must not have symbol.");
 
-				else if( Assemble_State.end == TRUE ){
-					new_error = (error*)malloc(sizeof(error));
-					new_error->line = line_num;
-					strcpy( new_error->message, "END must not have symbol.");
-					new_error->next = NULL;
-					push_into_error_list( new_error );		
-					Assemble_State.error = TRUE;
-				}
-
+				// Write
 				else{
-					write_interm( line_num, LOCCTR, arg_num, comment, token[0], token[1], ret , inst_num , token[2]);
-					LOCCTR += value;
+					write_interm(arg_num, comment, token[0], token[1], token[2]);
+					ASBL.LOCCTR += value;
 
 				}
 			}
 		}
-		line_num += 5;
+		ASBL.Line_num += 5;
 	}
 
-	if( Assemble_State.end == FALSE ){// Error
-		new_error = (error*)malloc(sizeof(error));
-		new_error->line = line_num;
-		strcpy( new_error->message, "not proper end of file.");
-		new_error->next = NULL;
-		push_into_error_list( new_error );		
-		Assemble_State.error = TRUE;
-	}
+	if( ASBL.Flags.end == FALSE )// Error
+		Push_into_error_list( "not proper end of file.");
 	
 	fclose(fp);
+
+	// Return Code Length
+	return (int)( ASBL.LOCCTR - ASBL.Flags.start);
+
 }
 
-void write_interm( int line_num, unsigned int LOCCTR, int arg_num, char comment[], char *symbol,  char *instruction, int inst_flag, int inst_num, char *operand){
+unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc ){
+
+	char *start = "START";
+	char *byte = "BYTE";
+	char *word = "WORD";
+	char *resb = "RESB";
+	char *resw = "RESW";
+	char *end = "END";
+	char *base = "BASE";
+	char *nobase = "NOBASE";
+
+	int state, len, i;
+	unsigned int value;
+	unsigned int ret = _NOTHING;
 	
-	/* 	 Line_Num            LOCCTR            Symbol            (+)Instruction            (@,#)    Operand           Opcode
-	   |  4space  | 4space | 4space | 4space | 6space | 4space |     7space     | 3space | 1space | 9space | 4space | 8space | 
-	   [0]        [4]      [8]      [12]     [16]     [22]     [26]             [33]     [36]     [37]     [46]     [50]  
+	if( strcmp( instruction, start ) == 0 ){// START
+
+		if( operand == NULL){
+			*inc = 0;
+			value = 0;
+		}
+		else{
+			state = Str_convert_into_Hex(operand, &value);
+
+			if( state == FALSE){
+				Push_into_error_list("operand has wrong character.");	
+			}
+			else
+				*inc = value;
+		}
+
+		state = push_symbol( instruction, value );
+		if( state == FALSE )
+			Push_into_error_list("fail to make SYMTAB.");
+
+		ASBL.Flags.start = (int)value;
+		ASBL.Inst_type = _DIRECTIVE;
+		ASBL.Inst_num = START;
+		return _DIRECTIVE; 
+	}
+	
+	else if( strcmp( instruction, end) == 0 ){// END
+		*inc = 0;
+		ASBL.Flags.end = TRUE;
+		ASBL.Inst_type = _DIRECTIVE;
+		ASBL.Inst_num = END;
+		return _DIRECTIVE;
+	}
+	
+	if( operand == NULL){
+		Push_into_error_list( "operand must exist.");
+		return _NOTHING;
+	}
+
+	else if( strcmp( instruction, base) == 0 ){// BASE
+		*inc = 0;
+		ASBL.Inst_type = _DIRECTIVE;
+		ASBL.Inst_num = BASE;
+		return _DIRECTIVE;
+	}
+	else if( strcmp( instruction, nobase) == 0 ){// NOBASE
+		*inc = 0;	
+		ASBL.Inst_type = _DIRECTIVE;
+		ASBL.Inst_num = NOBASE;
+		return _DIRECTIVE;
+	}
+		
+	else if( strcmp( instruction, byte) == 0 ){// BYTE
+		len = strlen( operand );
+		if( operand[1] != '\'' || operand[len-1] != '\'' ){
+			Push_into_error_list("Improper operand.");
+			ret = _NOTHING;
+		}
+		else if( operand[0] == 'C'){// char
+			*inc = ( len - 3 );
+			ret = _SYMBOL;
+		}	
+		else if( operand[0] == 'X'){// hexa
+			len -= 3;
+			len = ( len + 1 ) / 2;
+			*inc = len;
+			ret = _SYMBOL;
+		}
+		else{
+			Push_into_error_list("Improper operand.");
+			ret = _NOTHING;
+		}
+		ASBL.Inst_num = BYTE;
+		ASBL.Inst_type = ret;
+		return ret;
+	}
+
+	else if( strcmp( instruction, word ) == 0 ){// WORD
+		*inc = 3;
+		ASBL.Inst_type = _SYMBOL;
+		ASBL.Inst_num = WORD;
+		return _SYMBOL;
+	}
+
+	else if( ( strcmp( instruction, resb ) && strcmp( instruction, resw )) != 0 ){// mnemonic error
+		return _NOTHING;
+	}
+	else{
+		len = strlen(operand);
+		value = 0;
+		state = TRUE;
+		for( i = 0; i < len ; i++ ){
+			if( operand[i] >= '0' && operand[i] <= '9' ){
+				value *= 10;
+				value += (unsigned int)( operand[i] - '0' );
+			}
+			else{
+				state = FALSE;
+				break;
+			}
+		}			
+		if( state == FALSE ){//error
+			Push_into_error_list("operand has wrong character.");
+			return _NOTHING;
+		}
+
+		else if( strcmp( instruction , resb) == 0 ){// RESB
+			*inc= value;
+			ASBL.Inst_num = RESB;
+			ASBL.Inst_type = _SYMBOL;
+			return _SYMBOL;
+		}
+		else if( strcmp( instruction , resw) == 0 ){// RESW
+			*inc = ( 3 * value );
+			ASBL.Inst_num = RESW;
+			ASBL.Inst_type = _SYMBOL;
+			return _SYMBOL;
+		}
+	}
+}
+
+unsigned int Is_Mnemonic( char *mnemonic , char *operand, unsigned int *inc ){
+
+	char revise_mne[10];
+	char blank[2];
+
+	int format;
+	int flag_form4 = FALSE;
+
+	unsigned int inst_type = _NOTHING;
+	unsigned int opcode;
+	unsigned int operand_need;
+
+	if( mnemonic[0] == '+' ){
+		strcpy( revise_mne, mnemonic+1 );
+		flag_form4 = TRUE;
+	}
+	else
+		strcpy( revise_mne, mnemonic );
+		
+	find_opcode( revise_mne, &opcode , &inst_type);
+
+	// Not in OPTAB
+	if( inst_type == _NOTHING )
+		return inst_type;
+
+	// Not format4
+	if( ( ( inst_type & _FORMAT_3 ) == 0 ) && ( flag_form4 == TRUE ) ){
+		Push_into_error_list("This mnemonic doesn't have format 4.");
+		return inst_type;
+	}
+	
+
+	operand_need = inst_type & _INST_OPERAND;
+	
+	// Operand Number error
+	if( ( operand_need == _NO_OPERAND ) && ( operand != NULL ) ){
+		Push_into_error_list("This mnemonic doesn't have operand");
+		return inst_type;		
+	}
+	else if( ( operand_need != _NO_OPERAND ) && ( operand == NULL )){
+		Push_into_error_list( "This mnemonic must have operand.");
+		return inst_type;
+	}
+
+	switch( inst_type & _INST_FORMAT ){
+		
+		case _FORMAT_1: *inc = 1; break;
+		case _FORMAT_2: *inc = 2; break;
+		case _FORMAT_3: *inc = 3; break;
+		case _FORMAT_4: *inc = 4; break;
+	}
+
+	ASBL.Inst_num = opcode;
+	ASBL.Inst_type = inst_type;
+
+	return inst_type;
+}
+
+//---------------------------  PASS 2   ---------------------------
+
+void assem_pass2(char filename[], int code_len ){
+
+	FILE *fp;
+	FILE *fp2;
+	char *pt;
+	char interm_file_name[100];
+
+	char lst_line[38];
+	char operand[10];
+	char buffer[7];
+	char object_code[200];
+
+	unsigned int addr;
+	
+	int len, i, j, ret;
+
+	// File Open
+
+	strcpy( interm_file_name, ASBL.Output );
+	Output_File_Initialize( filename );
+
+	fp = fopen( interm_file_name , "r" );
+	if( fp == NULL ){		
+		Push_into_error_list("Intermediate file doesn't exist.");
+		return;
+	}
+
+	// Get PC
+	fgets( buffer, 5, fp );
+	Str_convert_into_Hex( buffer, &ASBL.PC );
+
+	
+	while(TRUE){
+
+		Get_Info_From_Interm_File( fp, lst_line, operand); 
+		
+		if( ( ASBL.Inst_type & _INST_INFO) == _DIRECTIVE ){
+
+			// START
+			if( ASBL.Inst_num == START ){
+
+				// Write List File
+				Write_lst( NULL, ASBL.LOCCTR, 4, FALSE );
+				Write_lst( lst_line, 0, 0, TRUE );
+
+				// Write Object File
+				Get_Token( lst_line, object_code, 4, 10 );// program name
+			   	Make_Hexa_String( ASBL.Flags.start, 6, object_code + 7 );// start adr.
+				Make_Hexa_String( code_len, 6, object_code + 13 );// code len.
+
+				Write_Obj( H, ASBL.LOCCTR, object_code );
+				continue;
+				
+			}
+
+			// END
+			else if( ASBL.Inst_num == END ){
+				
+				if( operand[0] == ' ' )
+					addr = ASBL.Flags.start;
+
+				else{
+					pt = strtok( operand, " ");
+					Find_Symbol( pt, &addr );
+				}
+				Write_lst("    ", 0, 0, FALSE );
+				Write_lst( lst_line, 0, 0, TRUE);
+
+				Write_Obj( E, addr , NULL );
+				break;
+			}
+		}
+
+		// Make Object Code
+		ret = Make_Object_Code( operand , object_code );
+		
+		if( ret == FALSE){// error
+			Push_into_error_list( "Improper operand.");
+			continue;
+		}
+
+		// Write Output File
+		if( ASBL.PC - ASBL.LOCCTR == 0 )
+			Write_lst( "    ", 0, 0, FALSE );
+
+		else
+			Write_lst( NULL, ASBL.LOCCTR, 4, FALSE );
+
+		Write_lst( lst_line, 0, 0, FALSE );
+		Write_lst( object_code, 0, 0, TRUE );
+
+		Write_Obj( T, ASBL.LOCCTR, object_code );
+	}
+
+	fclose( fp );
+
+	/* TEST
+	remove( interm_file_name );*/
+}
+
+// ---------------------- Intermediate File -------------------------------
+
+void write_interm( int arg_num, char comment[], char *symbol,  char *instruction, char *operand){
+	
+	/* 	  LOCCTR   Line num            Symbol            (+)Instruction            (@,#)    Operand           Opcode
+	   |  4space |  4space  | 4space | 6space | 4space |     7space     | 3space | 1space | 9space | 4space | 8space | 
+
+	   [0]       [4]        [8]      [12]     [18]     [22]             [29]     [32]     [33]     [42]     [46]  
 	*/
 
 	int len;
 	FILE *fp;
 	char flag;
 
-	if( Assemble_State.error == TRUE )
+	if( ASBL.Flags.error == TRUE )
 		return;
 
-	fp = fopen( Assemble_State.OutputFileName , "a");
+	fp = fopen( ASBL.Output , "a");
 
+	//Write LOCCTR
+	Write_Hex(fp, ASBL.LOCCTR, 4);
+
+	//Write Comment
 	if( arg_num == 0 ){
+		fprintf(fp, ".   " );
 		fprintf(fp, "%s", comment);
 		fclose(fp);
 		return;
 	}
-	//Write Line Num
-	Write_Hex(fp, (unsigned int)Line_num, 4);
-	Write_Blank(fp, 4);
 
-	// Write LOCCTR
-	Write_Hex(fp, LOCCTR, 4);
+	//Write Line Num
+	Write_Hex(fp, ASBL.Line_num , 4);
 	Write_Blank(fp, 4);
 
 	//Write SYMBOL
@@ -353,221 +600,666 @@ void write_interm( int line_num, unsigned int LOCCTR, int arg_num, char comment[
 		len = 14;
 	Write_Blank(fp, len );
 
-	// Write Directive or Format
-	Write_Hex( fp, (unsigned int)inst_flag, 1 );
+	// Write instruction code
+	Write_Hex( fp, ASBL.Inst_type , 2);
 
 	// Write Dir_num or Opcode
-	Write_Hex( fp, (unsigned int)inst_num, 2 );
+	Write_Hex( fp, ASBL.Inst_num , 1);
 
 	fprintf(fp, "\n");
-
 
 	fclose(fp);
 
 }
-int Is_Directive ( char *instruction , char *operand, unsigned int *inc, int line_num , int *dir_num){
 
-	char *start = "START";
-	char *byte = "BYTE";
-	char *word = "WORD";
-	char *resb = "RESB";
-	char *resw = "RESW";
-	char *end = "END";
-	char *base = "BASE";
-	char *nobase = "NOBASE";
+void Get_Info_From_Interm_File( FILE *fp, char lst_line[], char operand[]){
 
-	int state, i;
-	error *new_error;
-	unsigned int value;
-	int len;
-	int ret = Directive;
+	char buffer[5];
+	char comment[200];
+	char *pt;
+	int i;
+
+	// Comment
+	while( TRUE ){
+		fgets( buffer, 5, fp );
+		if( buffer[0] != '.' )
+			break;
+		fgets( comment, sizeof(comment), fp );
+		Write_lst( comment, 0, 0 , FALSE);
+	}
 	
-	if( strcmp( instruction, start ) == 0 ){// START
-		
-		Assemble_State.start = TRUE;
+	// Line number
+	Str_convert_into_Hex( buffer, &ASBL.Line_num );
+	
+	// Locctr
+	ASBL.LOCCTR = ASBL.PC;
+	
+	// One line
+	fgets( lst_line, 38 , fp );
 
-		if( operand == NULL){
-			*inc = 0;
-			value = 0;
-		}
-		else{
-			state = Str_convert_into_Hex(operand, &value);
-			if( state == FALSE){
-				new_error = (error*)malloc(sizeof(error));
-				new_error->line = line_num;
-				strcpy( new_error->message, "operand has wrong character.");
-				new_error->next = NULL;
-				push_into_error_list( new_error );		
-				Assemble_State.error = TRUE;
-			}
-			else
-				*inc = value;
-		}
-		
-		ret = push_symbol( instruction, value );
-		if( ret == FALSE ){
-			new_error = (error*)malloc(sizeof(error));
-			new_error->line = line_num;
-			strcpy( new_error->message, "fail to make SYMTAB.");
-			new_error->next = NULL;
-			push_into_error_list( new_error );		
-			Assemble_State.error = TRUE;
-		}
-		*inst_num = START;
-	}
-	else if( strcmp( instruction, end) == 0 ){// END
-		Assemble_State.end = TRUE;
-		*inst_num = END;
-	}
+	// Set NIXBPE
+	for( i = 0 ; i < 6; i++ )
+		ASBL.NIXBPE[i] = 0;
 
-	else if( strcmp( instruction, base) == 0 ){// BASE
-		*inc = 0;
-		*inst_num = BASE;
-	}
-	else if( strcmp( instruction, nobase) == 0 ){// NOBASE
-		*inc = 0;	
-		*inst_num = NOBASE;
-	}
-		
-	else if( strcmp( instruction, byte) == 0 ){// BYTE
-		len = strlen( operand );
-		if( operand[1] != '\'' || operand[len-1] != '\'' )
-			Assemble_State.error = TRUE;
-		if( operand[0] == 'C'){
-			*inc = ( len - 3 );
-		}	
-		else if( operand[0] == 'X'){
-			len -= 3;
-			len = ( len + 1 ) / 2;
-			*inc = len;
-		}
-		*inst_num = BYTE;
-	}
+	if( lst_line[28] == '@' )
+		ASBL.NIXBPE[0] = 1;
 
-	else if( strcmp( instruction, word ) == 0 ){// WORD
-		*inc = 3;
-		*inst_num = WORD;
-	}
+	else if( lst_line[28] == '#' )
+		ASBL.NIXBPE[1] = 1;
 
-	else if( ( strcmp( instruction, resb ) && strcmp( instruction, resw )) != 0 ){// mnemonic error
-		ret = Nothing;
-	}
 	else{
-		len = strlen(operand);
-		value = 0;
-		state = TRUE;
-		for( i = 0; i < len ; i++ ){
-			if( operand[i] >= '0' && operand[i] <= '9' ){
-				value *= 10;
-				value += (unsigned int)( operand[i] - '0' );
-			}
-			else{
-				state = FALSE;
-				break;
-			}
-		}			
-		if( state == FALSE ){//error
-			new_error = (error*)malloc(sizeof(error));
-			new_error->line = line_num;
-			strcpy( new_error->message, "operand has wrong character.");
-			new_error->next = NULL;
-			push_into_error_list( new_error );
-			Assemble_State.error = TRUE;
-		}
-		else if( strcmp( instruction , resb) == 0 ){// RESB
-			*inc= value;
-			*inst_num = RESB;
-		}
-		else if( strcmp( instruction , resw) == 0 ){// RESW
-			*inc = ( 3 * value );
-			*inst_num = RESW;
-		}
+		ASBL.NIXBPE[0] = 1;
+		ASBL.NIXBPE[1] = 1;
 	}
-	return ret;
+
+	// Operand
+	Get_Token( lst_line, operand, 25, 34 );
+
+	// Inst_type  & Inst_num
+	fgets( comment, fp );
+	buffer[0] = comment[0];
+	buffer[1] = comment[1];
+	buffer[2] = '\0';
+	Str_convert_into_Hex( buffer, &ASBL.Inst_type );
+
+	buffer[0] = comment[2];
+	buffer[1] = '\0';
+	Str_convert_into_Hex( buffer, &ASBL.Inst_num );
+
+	// PC
+	pt = fgets( buffer, 5, fp );
+	if( pt == NULL )// File End
+		return;
+
+	Str_convert_into_Hex( buffer, &ASBL.PC );
 }
 
-int Is_Mnemonic( char *mnemonic , char *operand, unsigned int *inc, int line_num, int *opcode){
+//---------------------- Write  Output File ---------------------------
 
-	char revise_mne[10];
-	char blank[2];
+void Write_lst( char line[], unsigned int LOCCTR, int len, int ENTER ){
 
-	error *new_error;
+	FILE *fp;
+	fp = fopen( ASBL.Output, "a" );
 
-	int format;
-	int ret = 0;
-	int format_flag = FALSE;
+	if( len != 0 )
+		Write_Hex( fp, LOCCTR, len);
 
-	if( mnemonic[0] == '+' ){
-		strcpy( revise_mne, mnemonic+1 );
-		format_flag = TRUE;
-	}
 	else
-		strcpy( revise_mne, mnemonic );
-		
-	format = find_opcode( revise_mne, opcode );
+		fprintf( fp, "%s", line );
+	
+	if( ENTER == TRUE )
+		fprintf( fp, "\n" );	
+	
+	fclose(fp);
 
-	if( opcode < 0 )// Cannot find in OPTAB
-		return ret;
+}
 
-	if( format < 3 && format_flag == TRUE ){
-		new_error = (error*)malloc(sizeof(error));
-		new_error->line = line_num;
-		strcpy( new_error->message, "This mnemonic doesn't have format 4.");
-		new_error->next = NULL;
-		push_into_error_list( new_error );		
-		Assemble_State.error = TRUE;
-		return ret;
+void Write_Obj( int flag, unsigned int addr, char object_code[]){
+	
+	FILE *fp;
+	int len, num;
+	int column;
+	char code[10];
+	unsigned int tmp;
+	char address[7];
+	char length[2];
+	int i;
+
+	fp = fopen( OBJ.Output, "a" );
+
+	switch( flag ){
+		case H: {
+					object_code[19] = '\0';
+					fprintf(fp, "H%s\n",object_code);
+					break;
+				}
+		case T:{
+				   len = strlen( object_code );
+				   column = OBJ.current_col;
+
+				   if( ( column != 0 ) && (column + len <= 69 ) ){
+					   strcat( OBJ.code + column , object_code );
+					   column += len;
+				   }
+				   else if( column != 0 ){
+					   OBJ.code[column] = '\0';
+					   Make_Hexa_String( column - 9, 2, length );
+					   OBJ.code[8] = length[0];
+					   OBJ.code[9] = length[1];
+					   fprintf( fp, "%s\n", OBJ.code);
+					   column = 0;
+				   }
+
+				   if( column == 0 ){
+					   code[0] = 'T';
+					   Make_Hexa_String( addr, 6, OBJ.code + 1 );
+					   strcpy( OBJ.code + 9, object_code );
+					   OBJ.current_col = len + 9;
+				   }
+				   break;
+			   }
+
+		case E:					
+		case M:{
+				   num = OBJ.modify_num;
+				   for( i = 0; i < num ; i ++ ){
+					   Make_Hexa_String( OBJ.modify_record[i], 8, code );
+					   fprintf(fp, "M%s\n", code);
+				   }
+				   
+				   Make_Hexa_String( addr , 6, address );
+				   fprintf( fp, "E%s", address );
+			   }
 	}
 	
-	switch( format ){
-		case 1: {
-					if( operand != NULL){
-						new_error = (error*)malloc(sizeof(error));
-						new_error->line = line_num;
-						strcpy( new_error->message, "This mnemonic must not have operand.");
-						new_error->next = NULL;
-						push_into_error_list( new_error );		
-						Assemble_State.error = TRUE;
-					}
-					*inc = 1;
-					ret = Format1;
-					break;
-				}
-		case 2: {
-					if( operand == NULL ){
-						new_error = (error*)malloc(sizeof(error));
-						new_error->line = line_num;
-						strcpy( new_error->message, "This mnemonic must have operand.");
-						new_error->next = NULL;
-						push_into_error_list( new_error );		
-						Assemble_State.error = TRUE;
-					}
-					*inc = 2;
-					ret = Format2;
-					break;
-				}
-		case 3: {
-					if( operand == NULL && strcmp( revise_mne, "RSUB" ) != 0 ){
-						new_error = (error*)malloc(sizeof(error));
-						new_error->line = line_num;
-						strcpy( new_error->message, "This mnemonic must have operand.");
-						new_error->next = NULL;
-						push_into_error_list( new_error );		
-						Assemble_State.error = TRUE;
-					}
-					if( format_flag == TRUE ){
-						*inc = 4;
-						ret = Format4;
-					}
-					else{
-						*inc = 3;
-						ret = Format3;
-					}
-					break;
-				}
+	fclose(fp);
+
+}
+
+
+//---------------------------- Making Code -----------------------------------
+
+int Make_Object_Code( char operand[], char object_code[]){
+	// return error or not
+
+	int inst_info;
+	int inst_format;
+	int inst_operand;
+	unsigned int inst_num = ASBL.Inst_num;
+	unsigned int displ;
+
+	char *reg[reg_num];
+	char *operand1, *operand2;
+
+	int ret = TRUE;
+	int val, val2;
+	int i, j, len;
+	int remain; 
+
+	inst_info = ASBL.Inst_type & _INST_INFO;
+	
+	if( inst_info == _OPCODE ){
+		
+		inst_format = ASBL.Inst_type & _INST_FORMAT;
+		inst_operand = ASBL.Inst_type & _INST_OPERAND;
+
+		switch( inst_format ){
+
+			case _FORMAT_1:{
+							  len = 2;
+							  break;
+						  }	 
+			case _FORMAT_2:{
+							  inst_num = inst_num << 4;
+
+							  operand1 = strtok( operand, "," );
+						      operand2 = strtok( NULL, "," );
+
+							  if( operand1 == NULL ){
+								  ret = FALSE;
+								  break;
+							  }
+							  
+							  switch( inst_operand ){
+
+								  case _ONE_REG:{
+													i = Is_Reg( operand1 );
+
+													if( i == reg_num )
+														ret = FALSE;
+
+													else if( operand2 != NULL )
+														ret = FALSE;
+													
+													else{
+														inst_num += i;
+														inst_num = inst_num << 4;
+													}
+													break;
+												}
+								  case _ONE_DEC:{
+													val = Is_Dec( operand1 );											
+													if( 0<= val && val <= 0xF && operand2 == NULL ){
+														inst_num += val;
+														inst_num = inst_num << 4;
+														ret = TRUE;
+													}
+													else
+														ret = FALSE;
+													break;
+												}
+
+								  case _TWO_REG:{
+													if( operand1 == NULL || operand2 == NULL )
+														ret = FALSE;
+
+													else{
+														val = Is_Reg( operand1 );
+														val2 = Is_Reg( operand2 );
+
+														if( val == reg_num || val2 == reg_num )
+															ret = FALSE;
+
+														else{
+															inst_num += val;
+															inst_num = inst_num << 4;
+															inst_num += val2;
+															ret = TRUE;
+														}
+													}
+													break;
+												}
+								  case _ONE_REG_ONE_DEC:{
+															if( operand1 == NULL || operand2 == NULL )
+																ret = FALSE;
+
+															else{
+																val = Is_Reg( operand1 );
+																val2 = Is_Dec( operand2 );
+
+																if( val == reg_num ){
+																	ret = FALSE;
+																	break;
+																}
+																else if( val > 0xF ){
+																	ret= FALSE;
+																	break;
+																}
+																inst_num += val;
+																inst_num = inst_num << 4;
+																inst_num += val2;
+															}
+														}
+							  }
+
+							  len = 4;
+							  break;
+						  }
+			case _FORMAT_3:{
+
+							 if( inst_operand != _NO_OPERAND ){
+
+								 ret = Make_Displ( &displ, operand );
+
+								 if( ret != FALSE ){
+
+									 // opcode 6bit
+									 inst_num = inst_num >> 2;
+
+									 // write nixbpe
+									 for( i = 0; i < 6 ; i ++ ){
+										 inst_num = inst_num << 1;
+										 if( ASBL.NIXBPE[i] == 1 ){
+											 inst_num += 1;
+										 }
+									 }
+									 inst_num = inst_num << 12;
+
+									 // write displ
+									 inst_num += displ;
+								 }
+							 }
+							 else
+								 inst_num = inst_num << 16;	
+
+							 len = 6;
+							 break;
+						  }	
+			case _FORMAT_4:{
+							  ASBL.NIXBPE[5] = 1;
+							  
+							  if( inst_operand != _NO_OPERAND ){
+
+								 ret = Make_Displ( &displ, operand );
+
+								 if( ret != FALSE ){
+
+									 // opcode 6 bit
+									 inst_num = inst_num >> 2;
+
+									 // write nixbpe
+									 for( i = 0; i < 6 ; i ++ ){
+										 inst_num = inst_num << 1;
+										 if( ASBL.NIXBPE[i] == 1 ){
+											 inst_num += 1;
+										 }
+									 }
+									 inst_num = inst_num << 20;
+									 
+									 //write displ;
+									 inst_num += displ;
+							 	 }
+							  }
+							  else
+								 inst_num = inst_num << 24;	
+
+							  len = 8;
+							  break;
+						  }
+
+		}
+
+		Make_Hexa_String( inst_num, len , object_code );
+	}
+
+	// Directive
+	else if( inst_info == _DIRECTIVE ){
+
+		object_code[0] = '\0';
+
+		switch( inst_num ){
+
+			case BASE:{
+						  ret = Find_Symbol( operand, &ASBL.Flags.base );
+						  break;
+					  }
+
+			case NOBASE:{
+							ASBL.Flags.base = -1;
+							break;
+						}
+
+			case BYTE:{
+						  len = strlen( operand );
+
+						  j = 0;
+						  if( ( operand[0] == 'X' ) && ( len % 2 == 1 ) ){
+							  object_code[j] = 0;
+							  j++;
+						  }
+						  for( i = 2 ; i < (len - 1 ) ; i++ ){
+
+							  // C'   ' case
+							  if( operand[0] == 'C' ){
+								  val = (int)operand[i];
+								  Make_Hexa_String( val, 2, object_code + j);
+								  j += 2;
+							  }
+
+							  // X'    ' case
+							  else if( operand[i] >= '0' && operand[i] <= '9' ){
+								  object_code[j] = operand[i];
+								  j++;								 
+							  }
+							  else if( operand[i] >= 'A' && operand[i] <= 'F' ){
+								  object_code[j] = operand[i];
+								  j++;
+							  }
+							  else{
+								  ret = FALSE;
+								  break;
+							  }
+						  }
+						  object_code[j] = '\0';
+						  break;
+					  }
+			case WORD:{
+						  val = Is_Dec( operand );
+						  if( val > 0xFFFFFF )
+							  ret = FALSE;
+
+						  else if( val == -1 )
+							  ret = FALSE;
+
+						  else
+							  Make_Hexa_String( val , 6, object_code );
+					  }
+		}
 	}
 	return ret;
 }
+
+
+int Make_Displ( unsigned int *displ, char operand[] ){
+
+	char *operand1, *operand2;
+	unsigned int address;
+	unsigned int tmp_displ;
+	int minus;
+	int ret = FALSE;
+	int i, len;
+	int val = -1;
+
+	operand1 = strtok( operand, "," );
+	operand2 = strtok( NULL, "r" );
+
+	if( operand1 != NULL){ 
+
+		// X flag
+		if( operand2 != NULL && strcmp( operand2,"X") == 0 ){
+			ASBL.NIXBPE[2] = 1;
+		}
+		else if( operand2 != NULL ){
+			ret = FALSE;
+			return ret;
+		}
+
+		// IMEDDIATE
+		if( ASBL.NIXBPE[0] == 0 && ASBL.NIXBPE[1] == 1 ){
+
+			// FIND DECIMAL
+			val = Is_Dec( operand1 );
+
+		}
+		if( val != -1 ){
+
+			// Judge Decimal Excess
+			if( ASBL.NIXBPE[5] == 0 && val > 0xFFF )
+				ret = FALSE;
+
+			else if( ASBL.NIXBPE[5] == 1 && val > 0xFFFFF )
+				ret = FALSE;
+			
+			// Store Decimal
+			else{
+				ASBL.NIXBPE[3] = ASBL.NIXBPE[4] = 0;
+				*displ = (unsigned int)val;
+				ret = TRUE;
+			}
+
+			return ret;
+		}
+
+		// FIND SYMTAB
+		else{
+
+			ret = Find_Symbol( operand, &address );
+				
+			if( ret != FALSE ){
+
+				// Format 4 and Need Modification
+				if( ASBL.NIXBPE[5] == 1 ){
+					if( address <= 0xFFFFF ){
+
+						*displ = address;
+						
+						// Store Modify code
+						address = ASBL.LOCCTR - ASBL.Flags.start + 1;
+						address = address << 8;
+						address += 5;
+
+						val = OBJ.modify_num;
+						OBJ.modify_record[val] = address;
+						OBJ.modify_num++;
+						ret = TRUE;
+
+					}
+					else
+						ret = FALSE;
+
+					return ret;
+				}
+
+				// PC-Relative
+				if( address < ASBL.PC ){
+					minus = TRUE;
+					tmp_displ = ASBL.PC - address;
+				}
+				else{
+					minus = FALSE;
+					tmp_displ = address - ASBL.PC;
+				}
+				if( 0 <= tmp_displ && tmp_displ <= 2047 ){
+
+					if( minus == TRUE ){
+						tmp_displ = tmp_displ ^ 0xFFF;
+						tmp_displ += 1;
+					}
+					ASBL.NIXBPE[4] = 1;
+					*displ = tmp_displ;
+					ret = TRUE;
+
+					return ret;
+				}
+
+				// Base_Relative
+				if( ASBL.Flags.base >= 0 ){
+
+					if( address >= ASBL.Flags.base ){
+						tmp_displ = address - ASBL.Flags.base;
+
+						if( 0 <= tmp_displ && tmp_displ <= 4095 ){
+							ASBL.NIXBPE[3] = 1;
+							*displ = tmp_displ;
+							ret = TRUE;
+
+							return ret;
+						}
+					}
+				}
+
+				// Direct_Address and Need Modified
+				if( address <= 0xFFF ){
+
+					*displ = address;
+					
+					// Store Modify code
+					address = ASBL.LOCCTR - ASBL.Flags.start + 1;
+					address = address << 8;
+					address += 3;
+
+					val = OBJ.modify_num;
+					OBJ.modify_record[val] = address;
+					OBJ.modify_num++;
+					ret = TRUE;
+
+					return ret;
+
+				}
+			}
+		}
+	}
+	return ret;
+}
+
+int Is_Reg( char *operand ){
+
+	int i;
+
+	for( i = 0 ; i < reg_num ; i++ )
+		if( strcmp( operand, reg[i] ) == 0 )
+			break;
+	return i;
+}
+
+int Is_Dec( char *operand ){
+
+	int len, i;
+	int val;
+
+	len = strlen( operand );
+	
+	for( i = 0; i < len ; i++ ){
+		if( operand[i] < '0' || operand[i] > '9' ){
+			val = -1;
+			break;
+		}
+		val += ( operand[i] - '0');
+	}
+	
+	return val;
+}
+
+
+void Get_Token( char line[], char store[], int start_idx, int end_idx){
+	int i;
+	int idx = 0;
+
+	for( i = start_idx ; i < end_idx ; i++, idx++ ){
+		
+		if( line[i] == ' ')
+			break;
+		
+		store[idx] = line[i];
+	}
+	store[idx] = '\0';	
+}
+
+// --------------------  Initialization ---------------------------------
+
+void Output_File_Initialize( char filename[] ){
+	
+	FILE *fp;
+	FILE *fp2;
+	int len;
+
+	len = strlen( filename );
+	len -= 4;
+	filename[len] = '\0';
+	
+	strcpy( ASBL.Output , filename );
+	strcpy( OBJ.Output , filename );
+	strcat( ASBL.Output , ".lst" );
+	strcat( OBJ.Output , ".obj");
+	fp = fopen( ASBL.Output, "w");
+	fclose( fp );
+	fp2 = fopen( OBJ.Output, "w");
+	fclose( fp2 );
+
+}
+
+void initial_reg( char *reg[] ){
+	reg[0] = "A";
+	reg[1] = "X";
+	reg[2] = "L";
+	reg[3] = "B";
+	reg[4] = "S";
+	reg[5] = "T";
+	reg[6] = "F";
+	reg[8] = "PC";
+	reg[9] = "SW";
+
+}
+
+
+// ----------------- OPTAB ------------------------------
+
+void find_opcode( char mnemonic[], unsigned int *opcode, unsigned int *inst_type){
+	int adr;
+	int format;
+	opcode_info *cur;
+
+	adr = Hash_func(mnemonic);
+	cur = Hash_Table[adr];
+	while(cur != NULL){
+		if( strcmp(cur->mnemonics, mnemonic) == 0)
+			break;
+		cur = cur->next;
+	}
+
+	//Not found
+	if( cur == NULL){
+		return;
+	}
+
+	*opcode = (unsigned int)cur->opcode;
+	*inst_type = (unsigned int)cur->type;
+
+	return;
+}
+
+
+// ------------------- SYMTAB ---------------------------
 
 int push_symbol( char *symbol, unsigned int LOCCTR ){
 
@@ -640,204 +1332,61 @@ int Find_Symbol( char *symbol, unsigned int *target_addr ){
 	return ret;
 }
 
-void assem_pass2(char filename[], int code_len ){
+void erase_symtab(){
+	int idx;
+	symbol_info *present;
+	symbol_info *next;
 
-	FILE *fp;
-	FILE *fp2;
-	
+	for( idx = 0; idx < SYMBOL_TABLE_SIZE ; idx++ ){
+		
+		next = SYMTAB[idx];
+		present = NULL;
+		while( next != NULL ){
+			present = next;
+			next = present->next;
+			free(present);
+			present = NULL;
+		}
+
+		SYMTAB[idx] = NULL;
+	}
+}
 
 
-	char operand[10];
-	unsigned int NI;
-	int inst_flag;
-	char inst_num[2];
-	char object_code[200];
-	char tmp[5];
 
-	char line[200];
-	char *pt;
-	
-	int len;
-	unsigned int line_num=5;
-	unsigned int next_line_num;
-	unsigned int LOCCTR;
-	unsigned int PC;
+// ------------------- Error List -------------------------
+void Push_into_error_list( char * mes){
 
 	error *new_error;
-
-	fp = fopen(Assemble_State.OutputFileName, "r" );
-	if( fp == NULL ){		
-		new_error = (error*)malloc(sizeof(error));
-		new_error->line = line_num;
-		strcpy( new_error->message, "Intermediate file doesn't exist.");
-		new_error->next = NULL;
-		push_into_error_list( new_error );		
-		Assemble_State.error = TRUE;
-		return;
-	}
-
-	// outputfile initialize
-	len = strlen( filename );
-	len -= 4;
-	filename[len] = '\0';
 	
-	strcpy( Assemble_State.OutputFileName, filename );
-	strcpy( Assemble_State.OutputFileName2, filename );
-	strcat( Assemble_State.OutputFileName, ".lst" );
-	strcat( Assemble_State.OutputFileName2, ".obj");
-	fp2 = fopen( Assemble_State.OutputFileName, "w");
-	fclose( fp2 );
-	fp2 = fopen( Assemble_State.OutputFileName2, "w");
-	fclose( fp2 );
+	new_error = (error*)malloc(sizeof(error));
+	new_error->line = ASBL.Line_num;
+	strcpy( new_error->message, mes);
+	new_error->next = NULL;					
+	ASBL.Flags.error = TRUE;
 
-	// Make Header Code
-
-	pt = fgets(line,200, fp);
-	if( pt == NULL){
-		new_error = (error*)malloc(sizeof(error));
-		new_error->line = line_num;
-		strcpy( new_error->message, "Intermediate file is empty.");
-		new_error->next = NULL;
-		push_into_error_list( new_error );		
-		Assemble_State.error = TRUE;
-		return;
-	}
-
-	// Get PC
-	Get_Token( line, tmp, 8, 12 );
-	Str_convert_into_Hex( tmp, &PC );
-
-	while(TRUE){
-
-		// Get LOCCTR
-		LOCCTR = PC;
-
-		// Get line number
-		Get_Token( line, tmp, 0, 4);
-		Str_convert_into_Hex( tmp, &next_line_num );
-
-		// N I flag set
-		NI = 1;
-		if( line[36] == '@' )
-			NI = NI<<1;
-		else if( line[36] != '#' ){
-			NI = NI<<1;
-			NI += 1;
-		}
-
-		// Get operand
-		Get_Token( line, operand, 37, 46 );
-
-		// Get Instruction flag
-		inst_flag = line[50]-'0';
-
-		// Get Instruction num
-		Get_Token( line, inst_num, 51,53 );
-
-		while( TRUE ){
-			pt = fgets( line, 200, fp );
-			if( pt == NULL )
-				break;
-			if( line[0] != '.' )
-				break;
-			Write_lst( line, 0, FALSE);
-		}
-		
-		// Get PC
-		Get_Token( line, tmp, 8, 12 );
-		Str_convert_into_Hex( tmp, &PC );
-
-		Make_Object_Code( operand, NI, inst_flag, inst_num, 	
-
-	
-
-
-
-}
-
-void Get_Token( char line[], char store[], int start_idx, int end_idx){
-	int i;
-	int idx = 0;
-
-	for( i = start_idx ; i < end_idx ; i++, idx++ ){
-		if( line[i] == ' ')
-			break;
-		store[idx] = line[i];
-	}
-	store[idx] = '\0';	
-}
-
-void Write_lst( char line[] , int LOC_chg, int ObjectCode){
-
-	FILE *fp;
-	fp = fopen( Assemble_State.OutputFileName, "a" );
-
-	if( line[0] == '.' ){
-		Write_Blank( fp, 4 );
-		fprintf(fp, "%s", comment );
-		fclose(fp);
-		return;
-	}
-
-	if( ObjectCode == False){
-
-		line[50] = '\0';
-
-		if( LOC_chg == 0 ){
-			line = line + 8;
-			Write_Blank( fp, 4 );
-			fprintf(fp, "%s", line);
-		}
-		else{
-			line = line + 4;
-			fprintf(fp, "%s", line);
-		}
-	}
-	else{
-
-		fprintf(fp,"\n");
-	}
-
-	fclose(fp);
-
-}
-int Make_Object_Code(){
-}
-
-void push_into_error_list(error *cur){
-	
 	if( Error_list_head == NULL ){
-		Error_list_head = cur;
-		Error_list_tail = cur;
+		Error_list_head = new_error;
+		Error_list_tail = new_error;
 	}
 	else{
-		Error_list_tail->next = cur;
-		Error_list_tail = cur;
+		Error_list_tail->next = new_error;
+		Error_list_tail = new_error;
 	}
+
 }
 
-int find_opcode( char mnemonic[], int *opcode){
-	int adr;
-	int format;
-	opcode_info *cur;
+void show_error_list(){// And erase
+	error *cur, *pre;
 
-	adr = Hash_func(mnemonic);
-	cur = Hash_Table[adr];
-	while(cur != NULL){
-		if( strcmp(cur->mnemonics, mnemonic) == 0)
-			break;
-		cur = cur->next;
+	pre = cur = Error_list_head;
+	while( cur != NULL ){
+		pre = cur;
+		cur = pre->next;
+		printf("line	%d	:	%s\n", pre->line, pre->message );
+		free(pre);
+		pre = NULL;
 	}
 
-	//Not found
-	if( cur == NULL){
-		return FALSE;
-	}
-
-	*opcode = (int)cur->opcode;
-	
-	for( format = 1; format <= 4; format++ )
-		if( cur->format[format] == 1 )
-			break;
-	return format;
+	Error_list_head = NULL;
 }

@@ -66,6 +66,22 @@ void Write_Hex(FILE *fp, unsigned int num, int len){
 	fprintf(fp,"%s",str);
 }
 
+void Make_Hexa_String( unsigned int num, int len, char str[]){
+	int i;
+	int remain;
+
+	for( i = len - 1 ; i >= 0 ; i-- ){
+		remain = num % 16;
+		num /= 16;
+			if( remain < 10 )
+			str[i] = remain + '0';
+		else
+			str[i] = ( remain - 10 ) + 'A';
+		
+	}
+	str[len] = '\0';
+}
+
 void Write_Blank(FILE *fp, int len){
 	int i;
 	for( i = 0 ; i < len ; i++ )
@@ -128,6 +144,8 @@ int Handling_Input(int mode, char input_str[], char str[], int len, int HEXA){
 		str[idx]='\0';
 	return ret;
 }
+
+
 int Get_argument(unsigned int *arg1, unsigned int *arg2, unsigned int *arg3, int arg_len[]){
 	int arg_num = 0;
 	int Max_arg_num = 3;
@@ -171,6 +189,7 @@ int Get_argument(unsigned int *arg1, unsigned int *arg2, unsigned int *arg3, int
 		Success = FALSE;
 	return arg_num;
 }
+
 int Get_String_Argument(char store[]){
 	// return a type of character which position is end of reading
 	int ret;
