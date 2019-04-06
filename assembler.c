@@ -186,13 +186,17 @@ int assem_pass1( char filename[] ){
 				Push_into_error_list ( "This line has too many arguments.");
 
 			else if( ( inst_type & _INST_INFO ) == _SYMBOL )// Need Symbol
-				Push_into_error_list( " This line must have Label.");
+				Push_into_error_list( "This line must have Label.");
 
 			// Write
 			else{
 				write_interm( arg_num, comment, blank, token[0], token[1]);
 				ASBL.LOCCTR += value;
 			}
+		}
+
+		else if( arg_num == 1){
+			Push_into_error_list( "There is no mnemonic or directive" );
 		}
 
 		// With Symbol
@@ -235,7 +239,6 @@ int assem_pass1( char filename[] ){
 				}
 			}
 		}
-		ASBL.Line_num += 5;
 	}
 
 	if( ASBL.Flags.end == FALSE )// Error
@@ -286,7 +289,7 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 		ASBL.Flags.start = (int)value;
 		ASBL.Inst_type = _DIRECTIVE;
 		ASBL.Inst_num = START;
-		return _DIRECTIVE; 
+		ret = _DIRECTIVE; 
 	}
 	
 	else if( strcmp( instruction, end) == 0 ){// END
@@ -294,19 +297,15 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 		ASBL.Flags.end = TRUE;
 		ASBL.Inst_type = _DIRECTIVE;
 		ASBL.Inst_num = END;
-		return _DIRECTIVE;
+		ret =  _DIRECTIVE;
 	}
 	
-	if( operand == NULL){
-		Push_into_error_list( "operand must exist.");
-		return _NOTHING;
-	}
-
 	else if( strcmp( instruction, base) == 0 ){// BASE
+
 		*inc = 0;
 		ASBL.Inst_type = _DIRECTIVE;
 		ASBL.Inst_num = BASE;
-		return _DIRECTIVE;
+		ret =  _DIRECTIVE;
 	}
 	else if( strcmp( instruction, nobase) == 0 ){// NOBASE
 		if( operand != NULL )
@@ -315,7 +314,7 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 			*inc = 0;	
 			ASBL.Inst_type = _DIRECTIVE;
 			ASBL.Inst_num = NOBASE;
-		return _DIRECTIVE;
+		ret =  _DIRECTIVE;
 	}
 		
 	else if( strcmp( instruction, byte) == 0 ){// BYTE
@@ -346,18 +345,18 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 		}
 		ASBL.Inst_num = BYTE;
 		ASBL.Inst_type = ret;
-		return ret;
+		ret = ret;
 	}
 
 	else if( strcmp( instruction, word ) == 0 ){// WORD
 		*inc = 3;
 		ASBL.Inst_type = _SYMBOL;
 		ASBL.Inst_num = WORD;
-		return _SYMBOL;
+		ret = _SYMBOL;
 	}
 
 	else if( ( strcmp( instruction, resb ) && strcmp( instruction, resw )) != 0 ){// mnemonic error
-		return _NOTHING;
+		ret = _NOTHING;
 	}
 	else{
 		len = strlen(operand);
@@ -375,22 +374,32 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 		}			
 		if( state == FALSE ){//error
 			Push_into_error_list("operand has wrong character.");
-			return _NOTHING;
+			ret = _NOTHING;
 		}
 
 		else if( strcmp( instruction , resb) == 0 ){// RESB
 			*inc= value;
 			ASBL.Inst_num = RESB;
 			ASBL.Inst_type = _SYMBOL;
-			return _SYMBOL;
+			ret = _SYMBOL;
 		}
 		else if( strcmp( instruction , resw) == 0 ){// RESW
 			*inc = ( 3 * value );
 			ASBL.Inst_num = RESW;
 			ASBL.Inst_type = _SYMBOL;
-			return _SYMBOL;
+			ret = _SYMBOL;
 		}
 	}
+
+	if( ret != _NOTHING ){
+		if( ASBL.Inst_num != START && ASBL.Inst_num != END && ASBL.Inst_num != NOBASE )
+			if( operand == NULL){
+				Push_into_error_list( "operand must exist.");
+				ret = _NOTHING;
+			}
+	}
+
+	return ret;
 }
 
 unsigned int Is_Mnemonic( char *mnemonic , char *operand, unsigned int *inc ){
@@ -544,7 +553,8 @@ void assem_pass2(char filename[], int code_len ){
 				case RESB:
 				case RESW:{
 							  OBJ.enter_flag = TRUE;
-							  Write_lst( NULL, ASBL.LOCCTR, 4, TRUE );
+							  Write_lst( NULL, ASBL.LOCCTR, 4, FALSE );
+							  Write_lst( lst_line, 0, 0, TRUE );
 
 							  Continue = TRUE;
 							  break;
@@ -680,7 +690,7 @@ void Get_Info_From_Interm_File( FILE *fp, char lst_line[], char operand[]){
 		if( buffer[0] != '.' )
 			break;
 		fgets( comment, sizeof(comment), fp );
-		Write_lst("    ", 0, 0, FALSE );
+		Write_lst("        ", 0, 0, FALSE );
 		Write_lst( comment, 0, 0 , FALSE);
 		fgets( buffer, 5, fp );
 	}
@@ -951,12 +961,13 @@ int Make_Object_Code( char operand[], char object_code[]){
 															else{
 																val = Is_Reg( operand1 );
 																val2 = Is_Dec( operand2 );
+																val2 -= 1;
 
 																if( val == reg_num ){
 																	ret = FALSE;
 																	break;
 																}
-																else if( val > 0xF ){
+																else if( val2 < 0 || val2 > 0xF ){
 																	ret= FALSE;
 																	break;
 																}
@@ -1092,6 +1103,7 @@ int Make_Displ( unsigned int *displ, char operand[] ){
 	unsigned int address;
 	unsigned int tmp_displ;
 	int minus;
+	int state;
 	int ret = FALSE;
 	int i, len;
 	int val = -1;
@@ -1140,9 +1152,9 @@ int Make_Displ( unsigned int *displ, char operand[] ){
 		// FIND SYMTAB
 		else{
 
-			ret = Find_Symbol( operand, &address );
+			state = Find_Symbol( operand, &address );
 				
-			if( ret != FALSE ){
+			if( state != FALSE ){
 
 				// Format 4 and Need Modification
 				if( ASBL.NIXBPE[5] == 1 ){
