@@ -419,8 +419,14 @@ unsigned int Is_Mnemonic( char *mnemonic , char *operand, unsigned int *inc ){
 		
 		case _FORMAT_1: *inc = 1; break;
 		case _FORMAT_2: *inc = 2; break;
-		case _FORMAT_3: *inc = 3; break;
-		case _FORMAT_4: *inc = 4; break;
+		case _FORMAT_3: 
+		case _FORMAT_4: {
+							if( flag_form4 == TRUE )
+								*inc = 4;
+							else
+								*inc = 3;
+							break;
+						}
 	}
 
 	ASBL.Inst_num = opcode;
@@ -604,7 +610,7 @@ void write_interm( int arg_num, char comment[], char *symbol,  char *instruction
 	Write_Hex( fp, ASBL.Inst_type , 2);
 
 	// Write Dir_num or Opcode
-	Write_Hex( fp, ASBL.Inst_num , 1);
+	Write_Hex( fp, ASBL.Inst_num , 2);
 
 	fprintf(fp, "\n");
 
@@ -625,7 +631,9 @@ void Get_Info_From_Interm_File( FILE *fp, char lst_line[], char operand[]){
 		if( buffer[0] != '.' )
 			break;
 		fgets( comment, sizeof(comment), fp );
+		Write_lst("    ", 0, 0, FALSE );
 		Write_lst( comment, 0, 0 , FALSE);
+		fgets( buffer, 5, fp );
 	}
 	
 	// Line number
@@ -635,38 +643,37 @@ void Get_Info_From_Interm_File( FILE *fp, char lst_line[], char operand[]){
 	ASBL.LOCCTR = ASBL.PC;
 	
 	// One line
-	fgets( lst_line, 38 , fp );
+	fgets( lst_line, 39 , fp );
 
 	// Set NIXBPE
 	for( i = 0 ; i < 6; i++ )
 		ASBL.NIXBPE[i] = 0;
 
-	if( lst_line[28] == '@' )
+	if( lst_line[24] == '@' )
 		ASBL.NIXBPE[0] = 1;
 
-	else if( lst_line[28] == '#' )
+	else if( lst_line[24] == '#' )
 		ASBL.NIXBPE[1] = 1;
 
 	else{
 		ASBL.NIXBPE[0] = 1;
 		ASBL.NIXBPE[1] = 1;
 	}
+	if( lst_line[14] == '+' )
+		ASBL.NIXBPE[5] = 1;
 
 	// Operand
 	Get_Token( lst_line, operand, 25, 34 );
 
 	// Inst_type  & Inst_num
-	fgets( comment, fp );
-	buffer[0] = comment[0];
-	buffer[1] = comment[1];
-	buffer[2] = '\0';
+	fgets( buffer, 3 , fp );
 	Str_convert_into_Hex( buffer, &ASBL.Inst_type );
 
-	buffer[0] = comment[2];
-	buffer[1] = '\0';
+	fgets( buffer, 4, fp );
+	buffer[2] = '\0';
 	Str_convert_into_Hex( buffer, &ASBL.Inst_num );
-
 	// PC
+
 	pt = fgets( buffer, 5, fp );
 	if( pt == NULL )// File End
 		return;
@@ -718,7 +725,8 @@ void Write_Obj( int flag, unsigned int addr, char object_code[]){
 				   column = OBJ.current_col;
 
 				   if( ( column != 0 ) && (column + len <= 69 ) ){
-					   strcat( OBJ.code + column , object_code );
+					   strcat( OBJ.code, object_code );
+					   OBJ.current_col += len;
 					   column += len;
 				   }
 				   else if( column != 0 ){
@@ -727,13 +735,16 @@ void Write_Obj( int flag, unsigned int addr, char object_code[]){
 					   OBJ.code[8] = length[0];
 					   OBJ.code[9] = length[1];
 					   fprintf( fp, "%s\n", OBJ.code);
-					   column = 0;
+					   OBJ.current_col = 0;
+					   column += len;
 				   }
 
 				   if( column == 0 ){
-					   code[0] = 'T';
+					   OBJ.code[0] = '\0';
+					   strcpy( OBJ.code, "T" );
 					   Make_Hexa_String( addr, 6, OBJ.code + 1 );
-					   strcpy( OBJ.code + 9, object_code );
+					   OBJ.code[9] = '\0';
+					   strcat( OBJ.code , object_code );
 					   OBJ.current_col = len + 9;
 				   }
 				   break;
@@ -748,7 +759,7 @@ void Write_Obj( int flag, unsigned int addr, char object_code[]){
 				   }
 				   
 				   Make_Hexa_String( addr , 6, address );
-				   fprintf( fp, "E%s", address );
+				   fprintf( fp, "E%s\n", address );
 			   }
 	}
 	
@@ -875,7 +886,8 @@ int Make_Object_Code( char operand[], char object_code[]){
 							  len = 4;
 							  break;
 						  }
-			case _FORMAT_3:{
+			case _FORMAT_3:
+			case _FORMAT_4:{
 
 							 if( inst_operand != _NO_OPERAND ){
 
@@ -893,50 +905,29 @@ int Make_Object_Code( char operand[], char object_code[]){
 											 inst_num += 1;
 										 }
 									 }
-									 inst_num = inst_num << 12;
+									 if( ASBL.NIXBPE[5] == 1 ){// Format 4
+										 inst_num = inst_num << 20;
+										 len = 8;
+									 }
+									 else{
+									 	inst_num = inst_num << 12;
+										len = 6;
+									 }
 
 									 // write displ
 									 inst_num += displ;
 								 }
 							 }
-							 else
+							 else if( ASBL.NIXBPE[5] == 1 ){// Format 4
+								 inst_num = inst_num << 24;
+								 len = 8;
+							 }
+							 else{
 								 inst_num = inst_num << 16;	
-
-							 len = 6;
+								 len = 6;
+							 }
 							 break;
-						  }	
-			case _FORMAT_4:{
-							  ASBL.NIXBPE[5] = 1;
-							  
-							  if( inst_operand != _NO_OPERAND ){
-
-								 ret = Make_Displ( &displ, operand );
-
-								 if( ret != FALSE ){
-
-									 // opcode 6 bit
-									 inst_num = inst_num >> 2;
-
-									 // write nixbpe
-									 for( i = 0; i < 6 ; i ++ ){
-										 inst_num = inst_num << 1;
-										 if( ASBL.NIXBPE[i] == 1 ){
-											 inst_num += 1;
-										 }
-									 }
-									 inst_num = inst_num << 20;
-									 
-									 //write displ;
-									 inst_num += displ;
-							 	 }
-							  }
-							  else
-								 inst_num = inst_num << 24;	
-
-							  len = 8;
-							  break;
 						  }
-
 		}
 
 		Make_Hexa_String( inst_num, len , object_code );
@@ -1267,7 +1258,7 @@ int push_symbol( char *symbol, unsigned int LOCCTR ){
 	symbol_info *new_sym;
 	symbol_info *pre, *cur;
 	int Hash_value;
-	int idx, len;
+	int idx, len, flag;
 
 	// Is symbol consist of Upper Alphabet?
 	len = strlen( symbol );
@@ -1287,11 +1278,15 @@ int push_symbol( char *symbol, unsigned int LOCCTR ){
 	pre = NULL;
 	cur = SYMTAB[Hash_value];
 
-	while( cur != NULL ){
-		switch( strcmp(symbol, cur->name) ){
-			case 0: ret = FALSE; break;
-			case 1: break;
+	while( cur != NULL ){		
+		flag = strcmp( symbol, cur->name );
+		if( flag == 0 ){
+			ret = FALSE;
+			break;
 		}
+		else if( flag > 0 )
+			break;
+
 		pre = cur;
 		cur = cur->next;
 	}
@@ -1321,11 +1316,15 @@ int Find_Symbol( char *symbol, unsigned int *target_addr ){
 	cur = SYMTAB[Hash_value];
 	while( cur != NULL ){
 		state = strcmp( symbol, cur->name);
-		if( state == -1 )
+		if( state < 0 )
 			cur = cur->next;
 		else if( state == 0 ){
 			ret = TRUE;
 			*target_addr = cur->address;
+			break;
+		}
+		else{
+			ret = FALSE;
 			break;
 		}
 	}
