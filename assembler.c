@@ -45,6 +45,7 @@ void assemble(){
 	initial_reg( reg );
 	OBJ.Output[0] = '\0';
 	OBJ.current_col = 0;
+	OBJ.enter_flag = FALSE;
 	OBJ.modify_num = 0;
 
 
@@ -289,7 +290,7 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 		ASBL.Flags.start = (int)value;
 		ASBL.Inst_type = _DIRECTIVE;
 		ASBL.Inst_num = START;
-		ret = _DIRECTIVE; 
+		return _DIRECTIVE; 
 	}
 	
 	else if( strcmp( instruction, end) == 0 ){// END
@@ -297,7 +298,7 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 		ASBL.Flags.end = TRUE;
 		ASBL.Inst_type = _DIRECTIVE;
 		ASBL.Inst_num = END;
-		ret =  _DIRECTIVE;
+		return _DIRECTIVE;
 	}
 	
 	else if( strcmp( instruction, base) == 0 ){// BASE
@@ -305,7 +306,7 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 		*inc = 0;
 		ASBL.Inst_type = _DIRECTIVE;
 		ASBL.Inst_num = BASE;
-		ret =  _DIRECTIVE;
+		return _DIRECTIVE;
 	}
 	else if( strcmp( instruction, nobase) == 0 ){// NOBASE
 		if( operand != NULL )
@@ -314,10 +315,15 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 			*inc = 0;	
 			ASBL.Inst_type = _DIRECTIVE;
 			ASBL.Inst_num = NOBASE;
-		ret =  _DIRECTIVE;
+		return _DIRECTIVE;
 	}
 		
 	else if( strcmp( instruction, byte) == 0 ){// BYTE
+
+		if( operand == NULL ){
+			Push_into_error_list( "operand must exist.");
+			return _NOTHING;
+		}
 		len = strlen( operand );
 		if( operand[1] != '\'' || operand[len-1] != '\'' ){
 			Push_into_error_list("Improper operand.");
@@ -345,20 +351,32 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 		}
 		ASBL.Inst_num = BYTE;
 		ASBL.Inst_type = ret;
-		ret = ret;
+		return ret;
 	}
 
 	else if( strcmp( instruction, word ) == 0 ){// WORD
+
+		if( operand == NULL ){
+			Push_into_error_list( "operand must exist.");
+			return _NOTHING;
+		}
+
 		*inc = 3;
 		ASBL.Inst_type = _SYMBOL;
 		ASBL.Inst_num = WORD;
-		ret = _SYMBOL;
+		return _SYMBOL;
 	}
 
 	else if( ( strcmp( instruction, resb ) && strcmp( instruction, resw )) != 0 ){// mnemonic error
-		ret = _NOTHING;
+		return _NOTHING;
 	}
 	else{
+
+		if( operand == NULL ){
+			Push_into_error_list( "operand must exist.");
+			return _NOTHING;
+		}
+
 		len = strlen(operand);
 		value = 0;
 		state = TRUE;
@@ -374,32 +392,22 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 		}			
 		if( state == FALSE ){//error
 			Push_into_error_list("operand has wrong character.");
-			ret = _NOTHING;
+			return _NOTHING;
 		}
 
 		else if( strcmp( instruction , resb) == 0 ){// RESB
 			*inc= value;
 			ASBL.Inst_num = RESB;
 			ASBL.Inst_type = _SYMBOL;
-			ret = _SYMBOL;
+			return _SYMBOL;
 		}
 		else if( strcmp( instruction , resw) == 0 ){// RESW
 			*inc = ( 3 * value );
 			ASBL.Inst_num = RESW;
 			ASBL.Inst_type = _SYMBOL;
-			ret = _SYMBOL;
+			return  _SYMBOL;
 		}
 	}
-
-	if( ret != _NOTHING ){
-		if( ASBL.Inst_num != START && ASBL.Inst_num != END && ASBL.Inst_num != NOBASE )
-			if( operand == NULL){
-				Push_into_error_list( "operand must exist.");
-				ret = _NOTHING;
-			}
-	}
-
-	return ret;
 }
 
 unsigned int Is_Mnemonic( char *mnemonic , char *operand, unsigned int *inc ){
