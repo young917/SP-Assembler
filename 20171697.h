@@ -118,6 +118,7 @@ typedef struct Assemble_Info{
 		int end;
 		int error;
 		int base;
+		int success;
 	}Flags;
 
 }Assemble_Info;
@@ -126,6 +127,7 @@ typedef struct Assemble_Info{
 typedef struct object_program{
 	char Output[100];
 	char code[70];
+	int enter_flag;
 	int current_col;
 	int modify_num;
 	unsigned int modify_record[500];
