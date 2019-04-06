@@ -1317,7 +1317,7 @@ void find_opcode( char mnemonic[], unsigned int *opcode, unsigned int *inst_type
 	int format;
 	opcode_info *cur;
 
-	adr = Hash_func(mnemonic);
+	adr = Hash_func(mnemonic, HASH_TABLE_SIZE);
 	cur = Hash_Table[adr];
 	while(cur != NULL){
 		if( strcmp(cur->mnemonics, mnemonic) == 0)
@@ -1360,7 +1360,7 @@ int push_symbol( char *symbol, unsigned int LOCCTR ){
 
 	strcpy( new_sym->name, symbol );
 	new_sym->address = LOCCTR;
-	Hash_value = Hash_func( symbol );
+	Hash_value = Hash_func( symbol, SYMBOL_TABLE_SIZE );
 
 	pre = NULL;
 	cur = SYMTAB[Hash_value];
@@ -1398,7 +1398,7 @@ int Find_Symbol( char *symbol, unsigned int *target_addr ){
 	int ret = FALSE;
 	int state;
 
-	Hash_value = Hash_func( symbol );
+	Hash_value = Hash_func( symbol, SYMBOL_TABLE_SIZE);
 	
 	cur = SYMTAB[Hash_value];
 	while( cur != NULL ){
@@ -1416,6 +1416,49 @@ int Find_Symbol( char *symbol, unsigned int *target_addr ){
 		}
 	}
 	return ret;
+}
+
+void show_symtab(){
+
+	symbol_info *table[SYMBOL_TABLE_SIZE];
+	int target;
+	int idx, judge;
+	int end_flag;
+
+	Success = FALSE;
+
+	for( idx = 0; idx < SYMBOL_TABLE_SIZE ; idx++ ){
+		table[idx] = SYMTAB[idx];
+	}
+
+	while(1){
+
+		end_flag = TRUE;
+		for( idx = 0; idx < SYMBOL_TABLE_SIZE; idx++ ){
+
+			if( table[idx] != NULL ){
+				if( end_flag == TRUE ){
+					target = idx;
+					end_flag = FALSE;
+				}
+				else{
+					judge = strcmp( table[target]->name, table[idx]->name );
+					if( judge < 0 )
+						target = idx;
+				}
+			}
+		}
+
+		if( end_flag == TRUE )
+			break;
+
+		Success = TRUE;
+		
+		printf("\t%s\t", table[target]->name );
+		Hex_convert_into_Str( table[target]->address, 4 );
+		printf("\n");
+		table[target] = table[target]->next;
+	}
 }
 
 void erase_symtab(){

@@ -19,6 +19,7 @@ int main (void){
 			case Opcodelist: opcodelist(); break;
 			case Type: show_content(); break;
 			case Assemble: assemble(); break;
+			case Symbol: show_symtab(); break;
 			default: Success = FALSE; break;
 		}
 		if(Success)
@@ -86,7 +87,7 @@ void Init(){
 }
 
 //************ Relate to Hash Table *********************
-int Hash_func(char mnemonics[]){//Return Hash value
+int Hash_func(char mnemonics[], int table_size){//Return Hash value
 	int idx = 0;
 	int total = 0;
 	int ret;
@@ -98,11 +99,11 @@ int Hash_func(char mnemonics[]){//Return Hash value
 		idx++;
 	}
 
-	ret = (total % HASH_TABLE_SIZE);
+	ret = (total % table_size);
 
 	// keep return value positive
 	if(ret < 0)
-		ret += HASH_TABLE_SIZE;
+		ret += table_size;
 
 	return ret;
 }
@@ -153,7 +154,7 @@ void Make_hash_table(){//Make Hash Table
 
 		// Get mnemonic
 		Handling_Input( Store_input, line, new_info->mnemonics, 6, FALSE);// Read
-		store_adr = Hash_func(new_info->mnemonics);//Store
+		store_adr = Hash_func(new_info->mnemonics, HASH_TABLE_SIZE );//Store
 
 		// Ignore space
 		Handling_Input( Erase_space, line, NULL, 0 , FALSE);
@@ -555,7 +556,7 @@ void opcode(){
 	}
 
 	//Find Hash value
-	adr = Hash_func(mnem);
+	adr = Hash_func(mnem, HASH_TABLE_SIZE );
 	//Error
 	if( adr < 0 ){
 		Success = FALSE;

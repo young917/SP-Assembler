@@ -19,7 +19,7 @@
 #define MEM_SIZE 1048576
 #define MEM_LIMIT 1048575
 #define HASH_TABLE_SIZE 20
-#define SYMBOL_TABLE_SIZE 20
+#define SYMBOL_TABLE_SIZE 23
 
 
 
@@ -136,7 +136,7 @@ typedef struct object_program{
 
 //--------------------------------  INITIALIZE  -------------------------------   
 void Init();
-int Hash_func(char mnemonics[]);
+int Hash_func(char mnemonics[], int table_size);
 void Make_hash_table();
 int Get_Command();
 
@@ -154,6 +154,7 @@ void opcode();
 void opcodelist();
 void show_content();
 void assemble();
+void show_symtab();
 
 //----------------------------------  ASSEMBLE  -------------------------------
 
@@ -185,7 +186,7 @@ void erase_symtab();
 void Push_into_error_list( char * mes);
 void show_error_list();
 
-// Manage input string
+//----------------------------  Manage input string  -----------------------------
 
 int Str_convert_into_Hex( char str[], unsigned int *num);
 void Hex_convert_into_Str( unsigned int num, int len);
