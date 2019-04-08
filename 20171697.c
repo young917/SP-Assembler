@@ -84,6 +84,16 @@ void Init(){
 	for( i = 0; i < SYMBOL_TABLE_SIZE ; i++ )
 		SYMTAB[i] = NULL;
 
+	//Initialize register
+	reg[0] = "A";
+	reg[1] = "X";
+	reg[2] = "L";
+	reg[3] = "B";
+	reg[4] = "S";
+	reg[5] = "T";
+	reg[6] = "F";
+	reg[8] = "PC";
+	reg[9] = "SW";
 }
 
 //************ Relate to Hash Table *********************

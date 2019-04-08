@@ -176,7 +176,6 @@ void Write_lst( char line[], unsigned int LOCCTR, int len, int ENTER );
 void Write_Obj( int flag, unsigned int addr, char object_code[]);
 
 void Output_File_Initialize( char filename[] );
-void initial_reg( char *reg[] );
 
 void find_opcode( char mnemonic[], unsigned int *opcode, unsigned int *inst_type);
 int push_symbol( char *symbol, unsigned int LOCCTR );

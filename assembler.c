@@ -4,11 +4,10 @@
 //---------------- ASSEMBLE MAIN ----------------------------
 void assemble(){
 	char filename[100];
-	char lstname[100];
-	int type, arg_num, len;
+	int type;
 	int code_len;
 
-
+	// Get file_name 
 	type = Get_String_Argument( filename );
 	if( Success == FALSE || type != ENTER){
 		Success = FALSE;
@@ -26,11 +25,11 @@ void assemble(){
 	// Pass1
 	code_len = assem_pass1(filename);
 	
-	if( ASBL.Flags.success == FALSE ){
+	if( ASBL.Flags.success == FALSE ){// If errors exist
+		
 		show_error_list();
 		
 		remove(ASBL.Output);
-
 		erase_symtab();
 		Success = FALSE;
 
@@ -42,7 +41,6 @@ void assemble(){
 	ASBL.Flags.base = -1;
 	ASBL.LOCCTR = 0;
 	ASBL.Line_num = 5;	
-	initial_reg( reg );
 	OBJ.Output[0] = '\0';
 	OBJ.current_col = 0;
 	OBJ.enter_flag = FALSE;
@@ -52,12 +50,12 @@ void assemble(){
 	// Pass2
 	assem_pass2(filename, code_len );
 	
-	if( ASBL.Flags.success == FALSE ){
+	if( ASBL.Flags.success == FALSE ){// If errors exist
+
 		show_error_list();
 
 		remove(ASBL.Output);
 		remove(OBJ.Output);
-
 		erase_symtab();
 		Success = FALSE;
 		return;
@@ -74,8 +72,6 @@ int assem_pass1( char filename[] ){
 
 	FILE *fp;
 	FILE *fp2;
-	char lst_name[100];
-	char *extend = ".lst";
 
 	char *token[3];
 	char line[200];
@@ -90,7 +86,7 @@ int assem_pass1( char filename[] ){
 
 	int len, i, ret;
 
-
+	// Open file to read
 	fp = fopen(filename,"r");
 	if( fp == NULL ){
 		Success = FALSE;
@@ -98,6 +94,7 @@ int assem_pass1( char filename[] ){
 		return 0;
 	}
 
+	// Open file to write
 	strcpy( ASBL.Output, filename );
 	strcat( ASBL.Output, ".txt" );
 	fp2 = fopen( ASBL.Output, "w" );
@@ -165,42 +162,44 @@ int assem_pass1( char filename[] ){
 
 		
 		// Without Symbol instruction check
-		inst_type = Is_Mnemonic( token[0], token[1] , &value );
 
+		//          Is it mnemonic?
+		inst_type = Is_Mnemonic( token[0], token[1] , &value );
 		if( ASBL.Flags.error == TRUE )
 			continue;
+		//          Is it Directive?
 		else if( (inst_type & _INST_INFO) == _NOTHING )
-			inst_type = Is_Directive( token[0], token[1] , &value );
-		
+			inst_type = Is_Directive( token[0], token[1] , &value );		
 		if( ASBL.Flags.error == TRUE )
 			continue;
+		//			                Yes
 		else if( (inst_type & _INST_INFO) != _NOTHING ){
 
-			// error
-			if( ASBL.Flags.start == -1 ){// START doesn't exist
+			// 				             Error
+			if( ASBL.Flags.start == -1 ){//...START doesn't exist
 				Push_into_error_list ( "Code must begin with START.");
 
 				ASBL.Flags.start = 0;
 			}
 
-			else if( arg_num > 2 )// Too much Operand
+			else if( arg_num > 2 )//...Too much Operand
 				Push_into_error_list ( "This line has too many arguments.");
 
-			else if( ( inst_type & _INST_INFO ) == _SYMBOL )// Need Symbol
+			else if( ( inst_type & _INST_INFO ) == _SYMBOL )//...Need Symbol
 				Push_into_error_list( "This line must have Label.");
 
-			// Write
+			//				            _Write
 			else{
 				write_interm( arg_num, comment, blank, token[0], token[1]);
 				ASBL.LOCCTR += value;
 			}
 		}
-
+		//					       Error
 		else if( arg_num == 1){
 			Push_into_error_list( "There is no mnemonic or directive" );
 		}
 
-		// With Symbol
+		// With Symbol instruction check
 		else{
 
 			// Store SYMBOL
@@ -211,16 +210,16 @@ int assem_pass1( char filename[] ){
 			else{
 
 				// Instruction Check
+				//			Is it mnemonic?
 				inst_type = Is_Mnemonic( token[1], token[2], &value);
-
 				if( ASBL.Flags.error == TRUE)
 					continue;
+				//			Is it directive?
 				else if( ( inst_type & _INST_INFO ) == _NOTHING )
 					inst_type = Is_Directive( token[1], token[2] , &value);
-
 				if( ASBL.Flags.error == TRUE )
 					continue;
-				// error
+				// 						Error
 				else if( ( inst_type & _INST_INFO ) == _NOTHING )
 					Push_into_error_list("It is not mnemonic or directive.");
 			
@@ -229,10 +228,10 @@ int assem_pass1( char filename[] ){
 					ASBL.Flags.start = 0;
 				}
 
-				else if( ASBL.Flags.end == TRUE )
-					Push_into_error_list("END must not have symbol.");
+				else if( ( value == 0 ) && ( ASBL.Inst_num != START ) )
+					Push_into_error_list("This line must not have symbol.");
 
-				// Write
+				// 						Write
 				else{
 					write_interm(arg_num, comment, token[0], token[1], token[2]);
 					ASBL.LOCCTR += value;
@@ -269,6 +268,7 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 	
 	if( strcmp( instruction, start ) == 0 ){// START
 
+		//...Judge operand
 		if( operand == NULL){
 			*inc = 0;
 			value = 0;
@@ -282,10 +282,10 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 			else
 				*inc = value;
 		}
-
+		//...Push into SYMTAB
 		state = push_symbol( instruction, value );
-		if( state == FALSE )
-			Push_into_error_list("fail to make SYMTAB.");
+		if( state == FALSE )//...Error: START enterend more than one
+			Push_into_error_list("START is already entered.");
 
 		ASBL.Flags.start = (int)value;
 		ASBL.Inst_type = _DIRECTIVE;
@@ -294,6 +294,7 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 	}
 	
 	else if( strcmp( instruction, end) == 0 ){// END
+		
 		*inc = 0;
 		ASBL.Flags.end = TRUE;
 		ASBL.Inst_type = _DIRECTIVE;
@@ -303,12 +304,17 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 	
 	else if( strcmp( instruction, base) == 0 ){// BASE
 
-		*inc = 0;
-		ASBL.Inst_type = _DIRECTIVE;
-		ASBL.Inst_num = BASE;
-		return _DIRECTIVE;
+		if( operand == NULL )
+			Push_into_error_list( "This directive must have operand." );
+		else{
+			*inc = 0;
+			ASBL.Inst_type = _DIRECTIVE;
+			ASBL.Inst_num = BASE;
+			return _DIRECTIVE;
+		}
 	}
 	else if( strcmp( instruction, nobase) == 0 ){// NOBASE
+	
 		if( operand != NULL )
 			Push_into_error_list( "This directive must not have operand." );
 		else
@@ -324,8 +330,9 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 			Push_into_error_list( "operand must exist.");
 			return _NOTHING;
 		}
+
 		len = strlen( operand );
-		if( operand[1] != '\'' || operand[len-1] != '\'' ){
+		if( len <= 3 || operand[1] != '\'' || operand[len-1] != '\'' ){
 			Push_into_error_list("Improper operand.");
 			ret = _NOTHING;
 		}
@@ -390,18 +397,20 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 				break;
 			}
 		}			
-		if( state == FALSE ){//error
+		if( state == FALSE || value == 0){//error
 			Push_into_error_list("operand has wrong character.");
 			return _NOTHING;
 		}
 
 		else if( strcmp( instruction , resb) == 0 ){// RESB
+
 			*inc= value;
 			ASBL.Inst_num = RESB;
 			ASBL.Inst_type = _SYMBOL;
 			return _SYMBOL;
 		}
 		else if( strcmp( instruction , resw) == 0 ){// RESW
+
 			*inc = ( 3 * value );
 			ASBL.Inst_num = RESW;
 			ASBL.Inst_type = _SYMBOL;
@@ -413,11 +422,8 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 unsigned int Is_Mnemonic( char *mnemonic , char *operand, unsigned int *inc ){
 
 	char revise_mne[10];
-	char blank[2];
 
-	int format;
 	int flag_form4 = FALSE;
-
 	unsigned int inst_type = _NOTHING;
 	unsigned int opcode;
 	unsigned int operand_need;
@@ -479,7 +485,6 @@ unsigned int Is_Mnemonic( char *mnemonic , char *operand, unsigned int *inc ){
 void assem_pass2(char filename[], int code_len ){
 
 	FILE *fp;
-	FILE *fp2;
 	char *pt;
 	char interm_file_name[100];
 
@@ -490,11 +495,10 @@ void assem_pass2(char filename[], int code_len ){
 
 	unsigned int addr;
 	
-	int len, i, j, ret;
+	int len, i, ret;
 	int Continue;
 
-	// File Open
-
+	// File Open and Set Output file name
 	strcpy( interm_file_name, ASBL.Output );
 	Output_File_Initialize( filename );
 
@@ -543,10 +547,10 @@ void assem_pass2(char filename[], int code_len ){
 				case END:{
 							 ASBL.Flags.end = TRUE;
 
-							 if( operand[0] == ' ' )
+							 if( operand[0] == ' ' )// Not exist operand
 								 addr = ASBL.Flags.start;
 							 
-							 else{
+							 else{// Find operand value
 								 pt = strtok( operand, " ");
 								 Find_Symbol( pt, &addr );
 							 }
@@ -797,6 +801,7 @@ void Write_Obj( int flag, unsigned int addr, char object_code[]){
 				   len = strlen( object_code );
 				   column = OBJ.current_col;
 
+				   // After meeting RESB or RESW
 				   if( OBJ.enter_flag == TRUE ){
 						OBJ.code[column] = '\0';
 					   temp = ( column - 9 ) / 2;
@@ -808,12 +813,13 @@ void Write_Obj( int flag, unsigned int addr, char object_code[]){
 					   OBJ.enter_flag = FALSE;
 					   column = 0;
 				   }
-
+				   // Not excess length
 				   else if( ( column != 0 ) && (column + len <= 69 ) ){
 					   strcat( OBJ.code, object_code );
 					   OBJ.current_col += len;
 					   column += len;
 				   }
+				   // Excess length
 				   else if( column != 0 ){
 					   OBJ.code[column] = '\0';
 					   temp = ( column - 9 ) / 2;
@@ -825,6 +831,7 @@ void Write_Obj( int flag, unsigned int addr, char object_code[]){
 					   column = 0;
 				   }
 
+				   // Write new line
 				   if( column == 0 ){
 					   OBJ.code[0] = '\0';
 					   strcpy( OBJ.code, "T" );
@@ -881,7 +888,6 @@ int Make_Object_Code( char operand[], char object_code[]){
 	unsigned int inst_num = ASBL.Inst_num;
 	unsigned int displ;
 
-	char *reg[reg_num];
 	char *operand1, *operand2;
 
 	int ret = TRUE;
@@ -932,7 +938,7 @@ int Make_Object_Code( char operand[], char object_code[]){
 												}
 								  case _ONE_DEC:{
 													val = Is_Dec( operand1 );											
-													if( 0<= val && val <= 0xF && operand2 == NULL ){
+													if( 0 <= val && val <= 0xF && operand2 == NULL ){
 														inst_num += val;
 														inst_num = inst_num << 4;
 														ret = TRUE;
@@ -1110,12 +1116,21 @@ int Make_Displ( unsigned int *displ, char operand[] ){
 	char *operand1, *operand2;
 	unsigned int address;
 	unsigned int tmp_displ;
+	int index_flag;
 	int minus;
 	int state;
 	int ret = FALSE;
 	int i, len;
 	int val = -1;
 
+	// Is comma exist?
+	index_flag = FALSE;
+	len = strlen(operand);
+	for( i = 0; i < len ; i++ )
+		if( operand[i] == ',' ){
+			index_flag = TRUE;
+			break;
+		}
 	operand1 = strtok( operand, "," );
 	operand2 = strtok( NULL, "r" );
 
@@ -1125,7 +1140,7 @@ int Make_Displ( unsigned int *displ, char operand[] ){
 		if( operand2 != NULL && strcmp( operand2,"X") == 0 ){
 			ASBL.NIXBPE[2] = 1;
 		}
-		else if( operand2 != NULL ){
+		else if( operand2 != NULL || index_flag == TRUE ){
 			ret = FALSE;
 			return ret;
 		}
@@ -1135,15 +1150,13 @@ int Make_Displ( unsigned int *displ, char operand[] ){
 			// FIND DECIMAL
 			val = Is_Dec( operand1 );
 		}
-
-
 		if( val != -1 ){
 
 			// Judge Decimal Excess
 			if( ASBL.NIXBPE[5] == 0 && val > 0xFFF )
 				ret = FALSE;
 
-			else if( ASBL.NIXBPE[5] == 1 && val > 0xFFFFF )
+			else if( ASBL.NIXBPE[5] == 1 && val > 0xFFFFF )//format 4
 				ret = FALSE;
 			
 			// Store Decimal
@@ -1196,17 +1209,23 @@ int Make_Displ( unsigned int *displ, char operand[] ){
 					minus = FALSE;
 					tmp_displ = address - ASBL.PC;
 				}
-				if( 0 <= tmp_displ && tmp_displ <= 2047 ){
+				if( 0 <= tmp_displ && tmp_displ <= 2048 ){
 
 					if( minus == TRUE ){
 						tmp_displ = tmp_displ ^ 0xFFF;
 						tmp_displ += 1;
 					}
-					ASBL.NIXBPE[4] = 1;
-					*displ = tmp_displ;
-					ret = TRUE;
 
-					return ret;
+					if( tmp_displ == 2048 )
+						ret = FALSE;
+					else{
+						ASBL.NIXBPE[4] = 1;
+						*displ = tmp_displ;
+						ret = TRUE;
+
+						return ret;
+					}
+
 				}
 
 				// Base_Relative
@@ -1223,25 +1242,6 @@ int Make_Displ( unsigned int *displ, char operand[] ){
 							return ret;
 						}
 					}
-				}
-
-				// Direct_Address and Need Modified
-				if( address <= 0xFFF ){
-
-					*displ = address;
-					
-					// Store Modify code
-					address = ASBL.LOCCTR - ASBL.Flags.start + 1;
-					address = address << 8;
-					address += 3;
-
-					val = OBJ.modify_num;
-					OBJ.modify_record[val] = address;
-					OBJ.modify_num++;
-					ret = TRUE;
-
-					return ret;
-
 				}
 			}
 		}
@@ -1299,14 +1299,12 @@ void Output_File_Initialize( char filename[] ){
 	
 	FILE *fp;
 	FILE *fp2;
-	int len;
+	char *name;
 
-	len = strlen( filename );
-	len -= 4;
-	filename[len] = '\0';
+	name = strtok( filename, "." );
 	
-	strcpy( ASBL.Output , filename );
-	strcpy( OBJ.Output , filename );
+	strcpy( ASBL.Output , name );
+	strcpy( OBJ.Output , name );
 	strcat( ASBL.Output , ".lst" );
 	strcat( OBJ.Output , ".obj");
 	fp = fopen( ASBL.Output, "w");
@@ -1316,25 +1314,12 @@ void Output_File_Initialize( char filename[] ){
 
 }
 
-void initial_reg( char *reg[] ){
-	reg[0] = "A";
-	reg[1] = "X";
-	reg[2] = "L";
-	reg[3] = "B";
-	reg[4] = "S";
-	reg[5] = "T";
-	reg[6] = "F";
-	reg[8] = "PC";
-	reg[9] = "SW";
-
-}
 
 
 // ----------------- OPTAB ------------------------------
 
 void find_opcode( char mnemonic[], unsigned int *opcode, unsigned int *inst_type){
 	int adr;
-	int format;
 	opcode_info *cur;
 
 	adr = Hash_func(mnemonic, HASH_TABLE_SIZE);
