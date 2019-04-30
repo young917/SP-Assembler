@@ -73,7 +73,7 @@ int assem_pass1( char filename[] ){
 	FILE *fp;
 	FILE *fp2;
 
-	char *token[3];
+	char *token[4];
 	char line[200];
 	char comment[200];
 	char *blank = "\0";
@@ -84,12 +84,12 @@ int assem_pass1( char filename[] ){
 	unsigned int value = 0;
 	unsigned int inst_type;
 
-	int len, i, ret;
+	int len, ret;
 
 	// Open file to read
 	fp = fopen(filename,"r");
 	if( fp == NULL ){
-		Success = FALSE;
+		ASBL.Flags.success = FALSE;
 		ASBL.Flags.error = TRUE;
 		return 0;
 	}
@@ -131,7 +131,7 @@ int assem_pass1( char filename[] ){
 			}
 
 			arg_num++;
-			if( arg_num == 3 )
+			if( arg_num > 3 )
 				break;
 			token[arg_num] = strtok( NULL, "\t\n ");
 		}
@@ -154,7 +154,7 @@ int assem_pass1( char filename[] ){
 		}
 
 		tmp = strtok( NULL, "\t\n ");
-		if( (tmp != NULL) ){// Excess : token more than 3
+		if( (tmp != NULL) || arg_num > 3 ){// Excess : token more than 3
 
 			Push_into_error_list( "Improper number of columns");
 			continue;
@@ -317,10 +317,11 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 	
 		if( operand != NULL )
 			Push_into_error_list( "This directive must not have operand." );
-		else
+		else{
 			*inc = 0;	
 			ASBL.Inst_type = _DIRECTIVE;
 			ASBL.Inst_num = NOBASE;
+		}
 		return _DIRECTIVE;
 	}
 		
@@ -417,6 +418,7 @@ unsigned int Is_Directive ( char *instruction , char *operand, unsigned int *inc
 			return  _SYMBOL;
 		}
 	}
+	return _NOTHING;
 }
 
 unsigned int Is_Mnemonic( char *mnemonic , char *operand, unsigned int *inc ){
@@ -547,7 +549,7 @@ void assem_pass2(char filename[], int code_len ){
 				case END:{
 							 ASBL.Flags.end = TRUE;
 
-							 if( operand[0] == ' ' )// Not exist operand
+							 if( operand[0] == '\0' )// Not exist operand
 								 addr = ASBL.Flags.start;
 							 
 							 else{// Find operand value
@@ -695,6 +697,7 @@ void Get_Info_From_Interm_File( FILE *fp, char lst_line[], char operand[]){
 	char comment[200];
 	char *pt;
 	int i;
+	unsigned int tmp;
 
 	// Comment
 	while( TRUE ){
@@ -708,7 +711,8 @@ void Get_Info_From_Interm_File( FILE *fp, char lst_line[], char operand[]){
 	}
 	
 	// Line number
-	Str_convert_into_Hex( buffer, &ASBL.Line_num );
+	Str_convert_into_Hex( buffer, &tmp );
+	ASBL.Line_num = (int)tmp;
 	
 	// Locctr
 	ASBL.LOCCTR = ASBL.PC;
@@ -781,7 +785,6 @@ void Write_Obj( int flag, unsigned int addr, char object_code[]){
 	FILE *fp;
 	int column;
 	char code[10];
-	unsigned int tmp;
 	char address[7];
 	char length[2];
 	int len, num, temp, i;
@@ -888,13 +891,14 @@ int Make_Object_Code( char operand[], char object_code[]){
 	unsigned int inst_num = ASBL.Inst_num;
 	unsigned int displ;
 
+	char org_operand[15];
 	char *operand1, *operand2;
+	int comma_num;
 
 	int ret = TRUE;
 	int val, val2;
 	int i, j, len;
-	int remain; 
-
+	
 	inst_info = ASBL.Inst_type & _INST_INFO;
 	
 	if( inst_info == _OPCODE ){
@@ -910,7 +914,17 @@ int Make_Object_Code( char operand[], char object_code[]){
 						  }	 
 			case _FORMAT_2:{
 							  inst_num = inst_num << 4;
+							  len = strlen( operand );
+							  comma_num = 0;
 
+							  for( i = 0; i < len ; i++ )
+								  if( operand[i] == ',' )
+									  comma_num++;
+							  if( comma_num > 1 ){
+								  ret = FALSE;
+								  break;
+							  }
+							  strcpy( org_operand, operand );
 							  operand1 = strtok( operand, "," );
 						      operand2 = strtok( NULL, "," );
 
@@ -922,12 +936,9 @@ int Make_Object_Code( char operand[], char object_code[]){
 							  switch( inst_operand ){
 
 								  case _ONE_REG:{
-													i = Is_Reg( operand1 );
+													i = Is_Reg( org_operand );
 
 													if( i == reg_num )
-														ret = FALSE;
-
-													else if( operand2 != NULL )
 														ret = FALSE;
 													
 													else{
@@ -937,8 +948,8 @@ int Make_Object_Code( char operand[], char object_code[]){
 													break;
 												}
 								  case _ONE_DEC:{
-													val = Is_Dec( operand1 );											
-													if( 0 <= val && val <= 0xF && operand2 == NULL ){
+													val = Is_Dec( org_operand );											
+													if( 0 <= val && val <= 0xF ){
 														inst_num += val;
 														inst_num = inst_num << 4;
 														ret = TRUE;
@@ -1051,7 +1062,8 @@ int Make_Object_Code( char operand[], char object_code[]){
 		switch( inst_num ){
 
 			case BASE:{
-						  ret = Find_Symbol( operand, &ASBL.Flags.base );
+						  ret = Find_Symbol( operand, &displ );
+						  ASBL.Flags.base = (int)displ;
 						  break;
 					  }
 
@@ -1125,12 +1137,19 @@ int Make_Displ( unsigned int *displ, char operand[] ){
 
 	// Is comma exist?
 	index_flag = FALSE;
+	state = TRUE;
 	len = strlen(operand);
 	for( i = 0; i < len ; i++ )
 		if( operand[i] == ',' ){
+			if( index_flag == TRUE ){// ',' more than once
+				state = FALSE;
+				break;
+			}
 			index_flag = TRUE;
-			break;
 		}
+	if( state == FALSE )
+		return ret;
+
 	operand1 = strtok( operand, "," );
 	operand2 = strtok( NULL, "r" );
 
@@ -1216,8 +1235,9 @@ int Make_Displ( unsigned int *displ, char operand[] ){
 						tmp_displ += 1;
 					}
 
-					if( tmp_displ == 2048 )
+					if( minus == FALSE && tmp_displ == 2048 )
 						ret = FALSE;
+
 					else{
 						ASBL.NIXBPE[4] = 1;
 						*displ = tmp_displ;
@@ -1253,9 +1273,12 @@ int Is_Reg( char *operand ){
 
 	int i;
 
-	for( i = 0 ; i < reg_num ; i++ )
+	for( i = 0 ; i < reg_num ; i++ ){
+		if( i == 7 )
+			continue;
 		if( strcmp( operand, reg[i] ) == 0 )
 			break;
+	}
 	return i;
 }
 

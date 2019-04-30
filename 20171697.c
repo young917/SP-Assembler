@@ -39,7 +39,7 @@ void Init(){
 
 	Exit_flag = FALSE;
 	History_Head = NULL;
-	Error_list_tail = Error_list_tail = NULL;
+	Error_list_head = Error_list_tail = NULL;
 
 	Memory = (unsigned char *)calloc(MEM_SIZE,sizeof(unsigned char));
 	if(Memory == NULL){
@@ -122,7 +122,7 @@ void Make_hash_table(){//Make Hash Table
 	char hex_str[3];
 	char format[4];
 	FILE *fp;
-	int i,j, tmp;
+	int i, tmp;
 	int store_adr;
 	char *ret;
 	unsigned int opc;
